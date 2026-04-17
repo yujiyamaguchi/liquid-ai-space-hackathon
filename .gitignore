@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+
+# Data (大きいファイル・生成物)
+apps/*/data/
+data/
+
+# Model weights & adapters
+apps/*/output/
+*.safetensors
+*.bin
+
+# Jupyter
+.ipynb_checkpoints/
+apps/*/docs/*_executed.ipynb
+
+# uv
+apps/*/.venv/
+
+# OS
+.DS_Store
