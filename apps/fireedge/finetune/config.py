@@ -15,13 +15,8 @@ class FinetuneConfig:
     seed: int = 42
 
     # ---------------------------------------------------------------- dataset
-    # 取得シーン数 (fire / no-fire 各上限)
-    n_fire_scenes: int = 40
-    n_nofire_scenes: int = 40
-    val_split: float = 0.15          # 15% を validation に
     max_cloud_cover: float = 50.0    # 雲量上限 [%]
-    simsat_base_url: str = "http://localhost:9005"
-    dataset_dir: str = "data/finetune/dataset"
+    dataset_dir: str = "data/build/hf_dataset"
     image_size: int = 448
 
     # ------------------------------------------------------------------ LoRA
@@ -36,8 +31,8 @@ class FinetuneConfig:
         # Multimodal projector (image→text grounding の要)
         "linear_1", "linear_2",
     ])
-    lora_r: int = 16
-    lora_alpha: int = 32
+    lora_r: int = 16        # poc2 の r=4 から拡大 (汎化向上)
+    lora_alpha: int = 32   # alpha = 2 * r
     lora_dropout: float = 0.05
 
     # --------------------------------------------------------------- training

@@ -58,17 +58,17 @@ def main():
     print("=" * 60)
 
     # ---------------------------------------------------------------- dataset
-    ds_path = Path(ROOT) / "data" / "finetune" / "hf_dataset"
+    ds_path = Path(ROOT) / "data" / "build" / "hf_dataset"
     if not ds_path.exists():
         print(f"[ERROR] dataset が見つかりません: {ds_path}")
         print("  先に `uv run python -m finetune.dataset_builder` を実行してください。")
         sys.exit(1)
 
-    ds = load_from_disk(str(ds_path))
-    train_ds = ds["train"]
-    val_ds   = ds["test"]
+    train_ds = load_from_disk(str(ds_path / "train"))
+    val_ds   = load_from_disk(str(ds_path / "val"))
     print(f"[Train] train={len(train_ds)}, val={len(val_ds)}")
     print(f"[Train] fire in train: {sum(train_ds['label'])}/{len(train_ds)}")
+    print(f"[Train] fire in val:   {sum(val_ds['label'])}/{len(val_ds)}")
 
     # ------------------------------------------------------------------ model
     print("\n[Train] モデルをロード中 ...")

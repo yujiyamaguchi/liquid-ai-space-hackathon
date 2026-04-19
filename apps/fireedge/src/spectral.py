@@ -14,10 +14,7 @@ from __future__ import annotations
 import numpy as np
 from PIL import Image
 
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from interfaces import (
+from .interfaces import (
     ProcessedScene,
     SentinelImageResponse,
     SpectralIndices,

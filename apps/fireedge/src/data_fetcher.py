@@ -19,10 +19,7 @@ import numpy as np
 import requests
 from PIL import Image
 
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from interfaces import (
+from .interfaces import (
     FIRE_DETECTION_BANDS,
     RECOMMENDED_SIZE_KM,
     SMOKE_DETECTION_BANDS,
