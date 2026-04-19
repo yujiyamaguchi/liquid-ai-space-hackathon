@@ -23,3 +23,7 @@ apps/*/.venv/
 
 # OS
 .DS_Store
+
+# Environment variables (API keys etc.)
+.env
+.env.local
