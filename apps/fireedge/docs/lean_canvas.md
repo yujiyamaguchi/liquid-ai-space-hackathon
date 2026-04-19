@@ -108,4 +108,4 @@
 
 ## 競合の全体像
 
-詳細は [spectral_background.md](spectral_background.md) の「競合比較表」セクション参照。
+詳細は上記「競合検知手法の比較」テーブルを参照。
