@@ -27,6 +27,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+import csv
+import io
+
 import numpy as np
 import requests
 from PIL import Image
@@ -140,37 +143,37 @@ def _firms_key() -> str:
     return key
 
 
-def fetch_firms(area: str, days: int = 7) -> list[dict]:
-    """FIRMS VIIRS_SNPP_NRT から検知イベントを取得する。"""
+def fetch_firms(area: str, days: int = 5) -> list[dict]:
+    """FIRMS VIIRS_SNPP_NRT から検知イベントを取得する。
+    days は 1〜5 のみ有効 (NRT 上限)。"""
     url = (
         f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/"
         f"{_firms_key()}/{FIRMS_PRODUCT}/{area}/{days}"
     )
     try:
-        r = requests.get(url, timeout=30)
+        r = requests.get(url, timeout=60)
         if not r.ok:
-            print(f"    [FIRMS] HTTP {r.status_code}: {r.text[:200]}")
+            print(f"    [FIRMS] HTTP {r.status_code}: {r.text[:300]}")
             return []
-        r.raise_for_status()
     except Exception as e:
         print(f"    [FIRMS] 取得失敗: {e}")
         return []
 
+    # csv.DictReader でヘッダー名ベースにパース (poc2_icl.py と同一方式)
     events = []
-    for line in r.text.splitlines()[1:]:  # ヘッダースキップ
-        parts = line.split(",")
-        if len(parts) < 9:
-            continue
+    for row in csv.DictReader(io.StringIO(r.text)):
         try:
+            date_str = row["acq_date"]
+            time_str = str(row["acq_time"]).zfill(4)
             events.append({
-                "lat":    float(parts[0]),
-                "lon":    float(parts[1]),
-                "frp":    float(parts[9]) if len(parts) > 9 else 0.0,
-                "date":   parts[5],   # "YYYY-MM-DD"
-                "time":   parts[6],   # "HHMM"
-                "conf":   parts[8],
+                "lat":  float(row["latitude"]),
+                "lon":  float(row["longitude"]),
+                "frp":  float(row.get("frp") or 0),
+                "date": date_str,            # "YYYY-MM-DD"
+                "time": time_str,            # "HHMM"
+                "conf": str(row.get("confidence", "n")).strip().lower(),
             })
-        except (ValueError, IndexError):
+        except Exception:
             continue
     return events
 
