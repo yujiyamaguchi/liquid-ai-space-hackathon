@@ -50,12 +50,21 @@ NEG_OFFSET_DAYS = 180  # NEG temporal: 検知日 - N日前 (fire season 外)
 WINDOW_SEC      = 12 * 86400  # SimSat 検索ウィンドウ ±12日
 SIZE_KM         = 5.0         # シーンサイズ
 
+# FIRMS Area CSV API の制約:
+#   - 最大取得日数: 10日 (NRT)
+#   - バウンディングボックス: 過大だと400エラーになる場合あり
+#     → poc2_icl.py で実績のある小さなボックスを流用し、エリア数を増やして補う
 FIRMS_AREAS = {
-    "Southeast Asia": "80,-10,145,30",
-    "South America":  "-82,-35,-34,15",
-    "Australia":      "113,-44,154,-10",
-    "Africa":         "-18,-35,55,20",
-    "North America":  "-170,30,-60,70",
+    # poc2_icl.py で実績済み
+    "west_africa":  "5,5,30,15",
+    "east_africa":  "25,0,45,15",
+    "seasia":       "95,5,140,20",
+    "amazon":       "-70,-15,-45,5",
+    # 追加エリア (poc2 と同程度のボックスサイズ)
+    "australia":    "130,-35,155,-15",
+    "cent_africa":  "10,-10,35,5",
+    "us_west":      "-125,35,-105,50",
+    "siberia":      "80,50,130,65",
 }
 FIRMS_PRODUCT = "VIIRS_SNPP_NRT"
 
@@ -581,8 +590,8 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--n-pos",      type=int, default=100,
                    help="FIRMS POS 件数 (NEG temporal は同数収集)")
-    p.add_argument("--firms-days", type=int, default=30,
-                   help="FIRMS API 取得日数")
+    p.add_argument("--firms-days", type=int, default=7,
+                   help="FIRMS API 取得日数 (NRT 上限=10日)")
     p.add_argument("--save-dir",   default="data/build/dataset")
     p.add_argument("--no-diverse", action="store_true",
                    help="diverse NEG をスキップ (デバッグ用)")
