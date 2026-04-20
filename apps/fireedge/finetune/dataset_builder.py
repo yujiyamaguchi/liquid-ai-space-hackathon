@@ -51,7 +51,7 @@ WINDOW_SEC      = 12 * 86400  # SimSat 検索ウィンドウ ±12日
 SIZE_KM         = 5.0         # シーンサイズ
 
 # FIRMS Area CSV API の制約:
-#   - 最大取得日数: 10日 (NRT)
+#   - 最大取得日数: 5日 (NRT) ← "Invalid day range. Expects [1..5]." で確認済み
 #   - バウンディングボックス: 過大だと400エラーになる場合あり
 #     → poc2_icl.py で実績のある小さなボックスを流用し、エリア数を増やして補う
 FIRMS_AREAS = {
@@ -148,6 +148,9 @@ def fetch_firms(area: str, days: int = 7) -> list[dict]:
     )
     try:
         r = requests.get(url, timeout=30)
+        if not r.ok:
+            print(f"    [FIRMS] HTTP {r.status_code}: {r.text[:200]}")
+            return []
         r.raise_for_status()
     except Exception as e:
         print(f"    [FIRMS] 取得失敗: {e}")
@@ -590,8 +593,8 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--n-pos",      type=int, default=100,
                    help="FIRMS POS 件数 (NEG temporal は同数収集)")
-    p.add_argument("--firms-days", type=int, default=7,
-                   help="FIRMS API 取得日数 (NRT 上限=10日)")
+    p.add_argument("--firms-days", type=int, default=5,
+                   help="FIRMS API 取得日数 (NRT 上限=5日)")
     p.add_argument("--save-dir",   default="data/build/dataset")
     p.add_argument("--no-diverse", action="store_true",
                    help="diverse NEG をスキップ (デバッグ用)")
