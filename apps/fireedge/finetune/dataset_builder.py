@@ -51,11 +51,11 @@ WINDOW_SEC      = 12 * 86400  # SimSat 検索ウィンドウ ±12日
 SIZE_KM         = 5.0         # シーンサイズ
 
 FIRMS_AREAS = {
-    "Southeast Asia": "80,−10,145,30",
-    "South America":  "−82,−35,−34,15",
-    "Australia":      "113,−44,154,−10",
-    "Africa":         "−18,−35,55,20",
-    "North America":  "−170,30,−60,70",
+    "Southeast Asia": "80,-10,145,30",
+    "South America":  "-82,-35,-34,15",
+    "Australia":      "113,-44,154,-10",
+    "Africa":         "-18,-35,55,20",
+    "North America":  "-170,30,-60,70",
 }
 FIRMS_PRODUCT = "VIIRS_SNPP_NRT"
 
