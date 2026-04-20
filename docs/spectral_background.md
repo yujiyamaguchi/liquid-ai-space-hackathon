@@ -25,7 +25,7 @@
 - 反射光より熱放射の寄与が大きくなる（高温物体の検出向き）
 
 Sentinel-2 の主要バンド (B11/B12/B8A など) の詳細・SimSat バンド名・用途は
-[sentinel2_guide.md](sentinel2_guide.md) §6〜9 を参照してください。
+[sentinel2_guide.md](sentinel2_guide.md) §7〜10 を参照してください。
 
 ---
 
