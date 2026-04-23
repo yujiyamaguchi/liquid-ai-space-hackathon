@@ -103,8 +103,7 @@ TRAIN_PROMPT = """\
 Examine this satellite false-color composite image (R=SWIR2.2μm, G=SWIR1.6μm, B=NIR).
 
 Does this scene contain active fire or burn scar?
-Respond with JSON:
-{{"fire_detected": <true|false>, "fire_confidence": <0.0-1.0>, "description": <string max 60 chars>}}\
+Respond with JSON only: {"fire_detected": true} or {"fire_detected": false}\
 """
 
 # ===========================================================================
@@ -125,19 +124,7 @@ def make_training_examples(
 
     examples = []
     for s in samples:
-        # アシスタント応答 (ラベルのみ、指標値なし)
-        if s.label:
-            response = json.dumps({
-                "fire_detected": True,
-                "fire_confidence": 0.90,
-                "description": "Fire or burn scar detected in this scene.",
-            })
-        else:
-            response = json.dumps({
-                "fire_detected": False,
-                "fire_confidence": 0.90,
-                "description": "No fire or burn scar detected in this scene.",
-            })
+        response = json.dumps({"fire_detected": bool(s.label)})
 
         messages_full = [
             {"role": "system", "content": [{"type": "text", "text": SYSTEM_PROMPT}]},

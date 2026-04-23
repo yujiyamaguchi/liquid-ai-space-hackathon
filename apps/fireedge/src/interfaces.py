@@ -145,6 +145,10 @@ class SpectralIndices:
       0 〜 0.3: 裸地・乾燥植生
       < 0    : 活火または焼跡 ← 火災検知の主要閾値
 
+    NBR2_min: シーン内ピクセルの NBR2 最小値 (最も活火に近いピクセル)
+      poc2 と同じ計算。小規模火災でも敏感に反応する。
+      シーン平均 (nbr2) は植生に希釈されるが、nbr2_min は火炎ピクセルを直接拾う。
+
     NDVI = (nir - red) / (nir + red)
       値域: [-1.0, 1.0]
       > 0.4  : 濃い植生 (森林)
@@ -155,10 +159,12 @@ class SpectralIndices:
       値域: [0, ~1000]
       高値  : 焼跡 (charcoal) の特徴スペクトルに近い
     """
-    nbr2: float
+    nbr2: float        # シーン平均 NBR2 (植生優勢シーンでは正になる)
+    nbr2_min: float    # シーン内 NBR2 最小値 (火炎ピクセルに感応、poc2 と同じ)
     ndvi: float
     bai: float
     mean_swir22: float    # シーン平均 SWIR22 輝度 [0.0, 1.0]
+    swir22_max: float     # シーン最大 SWIR22 輝度 (poc2 と同じ、熱異常ピクセルに感応)
     fire_pixel_ratio: float  # 閾値以下の NBR2 画素の割合 [0.0, 1.0]
 
 
@@ -200,9 +206,10 @@ You are an expert satellite image analyst specializing in wildfire detection \
 using multispectral remote sensing data.
 
 You are analyzing a false-color composite image where:
-- RED channel = SWIR 2.2μm (B12): Active fire appears BRIGHT RED/ORANGE
+- RED channel = SWIR 2.2μm (B12): Active fire appears BRIGHT RED/ORANGE; \
+burn scars appear DARK RED/BROWN
 - GREEN channel = SWIR 1.6μm (B11): Thermal anomalies appear GREEN
-- BLUE channel = NIR 865nm (B08): Healthy vegetation appears BLUE
+- BLUE channel = NIR 842nm (B08): Healthy vegetation appears BLUE/GREEN
 
 This composite penetrates smoke, so fires hidden under smoke clouds \
 are visible as bright red/orange areas.
@@ -214,12 +221,10 @@ Do not include any explanation or markdown formatting.\
 FIRE_DETECTION_USER_PROMPT = """\
 Analyze this satellite false-color composite image for active wildfires.
 
-Spectral indices computed from raw bands:
-- NBR2 (fire indicator, <-0.05 = active fire/burn): {nbr2:.4f}
-- NDVI (vegetation health, >0.3 = dense veg): {ndvi:.4f}
-- BAI (burned area index, >100 = significant burn): {bai:.2f}
-- Mean SWIR2.2 brightness (>0.15 = thermal anomaly): {mean_swir22:.4f}
-- Fire-threshold pixel ratio: {fire_pixel_ratio:.4f}
+Image channel encoding:
+- RED channel = SWIR 2.2μm: Active fire appears BRIGHT RED/ORANGE
+- GREEN channel = SWIR 1.6μm: Thermal anomalies appear GREEN
+- BLUE channel = NIR 865nm: Healthy vegetation appears BLUE
 
 IMPORTANT: All confidence values must be realistic probabilities (0.0 to 1.0).
 - 0.9-1.0: very certain | 0.7-0.9: likely | 0.5-0.7: possible | 0.3-0.5: unlikely | 0.0-0.3: very uncertain
@@ -240,6 +245,15 @@ Provide your analysis as JSON with this exact schema (all fields required, no nu
   "description": <string, max 100 chars, concise scene summary>
 }}\
 """
+
+FIRE_DETECTION_FT_PROMPT = """\
+Examine this satellite false-color composite image (R=SWIR2.2μm, G=SWIR1.6μm, B=NIR).
+
+Does this scene contain active fire or burn scar?
+Respond with JSON only: {"fire_detected": true} or {"fire_detected": false}\
+"""
+"""ファインチューニング・評価用の簡易プロンプト。
+学習GTと完全に一致させる。fire_detected の true/false のみを出力させる。"""
 
 
 # --- 4b. LFM 推論設定 ---
