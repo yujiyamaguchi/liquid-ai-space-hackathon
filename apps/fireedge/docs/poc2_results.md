@@ -1,5 +1,5 @@
 # FireEdge /poc2 結果レポート
-**実施日**: 2026-04-19  
+**最終更新**: 2026-04-21  
 **フェーズ**: モデル PoC (CLAUDE.md §3)
 
 ---
@@ -9,7 +9,7 @@
 | 完了条件 | 結果 |
 |---|---|
 | ① few-shot ICL で LFM-VL がドメイン固有の疑似カラー画像に対して一定の判断ができること | ✅ (baseline 確立) |
-| ② 小規模 LoRA FT (10〜20 サンプル) で few-shot より改善が見られること | ✅ Recall 0.00 → 0.75 |
+| ② 小規模 LoRA FT (10〜20 サンプル) で few-shot より改善が見られること | ✅ Recall 0.00 → 1.00、汎化 FP Rate 0.14 |
 
 ---
 
@@ -19,10 +19,10 @@
 cd apps/fireedge
 
 # Step 1: Few-shot ICL baseline
-uv run python poc2_icl.py
+uv run python experiments/poc2_icl.py
 
 # Step 2: LoRA FT vs ICL baseline
-uv run python poc2_lora.py --train 10 --test 4 --epochs 5 --days 5
+uv run python experiments/poc2_lora.py --train 16 --test 8 --epochs 5 --days 5
 ```
 
 ---
@@ -43,9 +43,9 @@ uv run python poc2_lora.py --train 10 --test 4 --epochs 5 --days 5
 
 - **地理的除外 (旧方式の問題点)**: 「FIRMS 検知地から 25km 以内を除外」しても、都市・砂漠・海など
   NBR2 が低下する地域に負例が当たるリスクがあり、モデルが burn scar 以外の視覚特徴を学習してしまう。
-- **時間オフセット (採用方式)**: 同一地点の 180 日前 (東南アジアでは乾季/雨季で火災シーズンが反転)
+- **時間オフセット (採用方式)**: 同一地点の 180 日前（東南アジアでは乾季/雨季で火災シーズンが反転）
   を問い合わせることで、土地被覆の差をゼロにしつつ burn scar シグナルのみを差異とできる。
-- **Δ ≥ 0 フィルター**: S2 が FIRMS 検知より前に撮像されていた場合 (未燃地が fire ラベルになる)
+- **Δ ≥ 0 フィルター**: S2 が FIRMS 検知より前に撮像されていた場合（未燃地が fire ラベルになる）
   を排除する。
 
 ### パラメータ
@@ -61,12 +61,12 @@ uv run python poc2_lora.py --train 10 --test 4 --epochs 5 --days 5
 
 ## スペクトル分布確認
 
-Δ ≥ 0 フィルター通過後のサンプル（学習・テスト合計 28 サンプル）における NBR2_min 分布:
+Δ ≥ 0 フィルター通過後のサンプル（学習・テスト合計 48 サンプル）における NBR2_min 分布:
 
 | クラス | min | mean | max |
 |---|---|---|---|
-| POS (burn scar あり) | −0.643 | −0.291 | +0.008 |
-| NEG (同地点・180日前) | −0.165 | −0.065 | +0.029 |
+| POS (burn scar あり) | −0.645 | −0.324 | +0.012 |
+| NEG (同地点・180日前) | −0.224 | −0.052 | +0.155 |
 
 **分離判定: ✅ POS mean < NEG mean − 0.05** → 学習データとして十分な分離
 
@@ -97,6 +97,20 @@ few-shot 例示のみでは LFM 2.5-VL-450M には困難であることを確認
 
 ## Step 2: LoRA Fine-tuning
 
+### GT 設計の変更
+
+当初は `fire_detected` + `fire_confidence` + `description` の 3 フィールド構成だったが、
+`fire_confidence` がスペクトル指標の計算式から導かれる循環的なラベルであること、
+`description` フィールドに `NBR2_min` 等の数値が埋め込まれモデルへの答え漏洩になることが判明。
+
+GT をシンプルな 1 フィールドに変更した:
+
+```json
+{"fire_detected": true}   // または false
+```
+
+これにより、モデルが画像の視覚パターンから fire/no-fire を判断する純粋な分類タスクになる。
+
 ### 学習設定
 
 | 項目 | 値 |
@@ -109,8 +123,8 @@ few-shot 例示のみでは LFM 2.5-VL-450M には困難であることを確認
 | 学習率 | 2e-4 |
 | Optimizer | AdamW (weight_decay=0.01) |
 | Epochs | 5 |
-| 学習サンプル数 | 20 (POS:10 / NEG:10) |
-| テストサンプル数 | 8 (POS:4 / NEG:4) |
+| 学習サンプル数 | 32 (POS:16 / NEG:16) |
+| テストサンプル数 | 16 (POS:8 / NEG:8) |
 | 学習可能パラメータ | 2,201,600 (全体の 0.49%) |
 | VRAM 使用量 (FT前後) | ~0.9 GB |
 
@@ -118,39 +132,80 @@ few-shot 例示のみでは LFM 2.5-VL-450M には困難であることを確認
 
 | Epoch | Loss |
 |---|---|
-| 1 | 0.1911 |
-| 2 | 0.0389 |
-| 3 | 0.0200 |
-| 4 | 0.0131 |
-| 5 | 0.0081 |
+| 1 | 0.1518 |
+| 2 | 0.0718 |
+| 3 | 0.0662 |
+| 4 | 0.0283 |
+| 5 | 0.0037 |
 
-5 epoch で loss が安定的に収束。過学習の兆候なし（テスト FP Rate=0.00）。
+### 推論結果 (テストセット 16 サンプル)
 
-### 推論結果 (テストセット 8 サンプル)
-
-| # | サンプル | GT | Pred (FT後) |
-|---|---|---|---|
-| 1 | POS#18 FRP=124MW | FIRE | ✅ FIRE |
-| 2 | NEG#18 (same loc, -180d) | NO-FIRE | ✅ NO-FIRE |
-| 3 | POS#19 FRP=124MW | FIRE | ✅ FIRE |
-| 4 | NEG#19 (same loc, -180d) | NO-FIRE | ✅ NO-FIRE |
-| 5 | POS#21 FRP=116MW | FIRE | ✅ FIRE |
-| 6 | NEG#21 (same loc, -180d) | NO-FIRE | ✅ NO-FIRE |
-| 7 | POS#23 FRP=108MW | FIRE | ❌ NO-FIRE |
-| 8 | NEG#23 (same loc, -180d) | NO-FIRE | ✅ NO-FIRE |
+全 16 件正解 (TP=8, FP=0, TN=8, FN=0)。
 
 ### 評価指標
 
 | 指標 | ICL baseline | Zero-shot (FT前) | **LoRA FT (FT後)** |
 |---|---|---|---|
-| Recall | 0.00 | 1.00 ※ | **0.75** |
+| Recall | 0.00 | 1.00 ※ | **1.00** |
 | Precision | — | 0.50 | **1.00** |
 | FP Rate | 0.00 | 1.00 ※ | **0.00** |
-| Accuracy | — | 0.50 | **0.88** |
+| Accuracy | — | 0.50 | **1.00** |
 
-※ Zero-shot (FT前) は全件 FIRE と予測する退化解。Recall=1.00 は意味のある値でない。
+※ Zero-shot (FT前) は全件 FIRE と予測する退化解。
 
-**→ ICL baseline (Recall=0.00) に対して LoRA FT は Recall=0.75, FP Rate=0.00 を達成。完了条件② 満たす。**
+**→ ICL baseline (Recall=0.00) に対して LoRA FT は Recall=1.00, FP Rate=0.00 を達成。完了条件② 満たす。**
+
+> **注意**: テストセットが学習と同一の FIRMS 座標・時間構造 (+2d/-180d) のため、
+> 完璧なスコアは視覚特徴の汎化を保証しない。汎化確認の結果が実態に近い指標。
+
+---
+
+## 汎化確認 (FIRMS 非関連地点での FP Rate)
+
+### 目的
+
+訓練・評価データが FIRMS 検知地点に偏っているという課題を定量的に検証するため、
+FIRMS と無関係な 16 地点（森林・農地・砂漠・都市・湿地・サバンナ・海洋）で
+LoRA FT 後のモデルに推論させ、FP Rate を計測した。
+
+### 結果
+
+| カテゴリ | 地点 | 結果 |
+|---|---|---|
+| 森林 | Germany Black Forest | ❌ FP |
+| 森林 | Canada boreal forest (Manitoba) | ✅ TN |
+| 森林 | Brazil deep Amazon | ✅ TN |
+| 農地 | France agricultural land | ✅ TN |
+| 農地 | Japan rice paddies (Aichi) | ✅ TN |
+| 草地 | Ireland grassland | ✅ TN |
+| 砂漠 | Sahara Desert (Algeria) | ✅ TN |
+| 砂漠 | Arabian Peninsula (Saudi Arabia) | ✅ TN |
+| 砂漠 | Australian outback (South Australia) | ✅ TN |
+| 都市 | Tokyo suburban area | ✅ TN |
+| 都市 | London suburbs | ✅ TN |
+| 湿地 | Bangladesh Ganges delta | ✅ TN |
+| サバンナ | Kenya savanna (rainy season) | ❌ FP |
+| 海洋 | Indian Ocean | ✅ TN |
+| 海洋 | North Pacific Ocean | ⚠️ 画像なし (スキップ) |
+| 海洋 | North Atlantic Ocean | ⚠️ 画像なし (スキップ) |
+
+**有効サンプル: 14件 / FP: 2件 / FP Rate: 0.14 → 精度目標 (≤0.15) ✅ 達成**
+
+### 前回比較
+
+| 実施日 | GT形式 | 学習数 | 汎化 FP Rate |
+|---|---|---|---|
+| 2026-04-19 | 3フィールド (confidence含む) | 20 | **0.57 ❌** |
+| 2026-04-21 | 1フィールド (fire_detected のみ) | 32 | **0.14 ✅** |
+
+GT 簡素化 (循環ラベル・答え漏洩の排除) と学習サンプル増加の両方が改善に寄与したと考えられる。
+
+### 残 FP の考察
+
+- **Germany Black Forest**: 4月の温帯落葉樹林。落葉後の裸地テクスチャが burn scar に類似している可能性
+- **Kenya savanna**: 4月は雨季のはずだが、前乾季の乾燥シグナルが残存していた可能性
+
+いずれも burn scar との視覚的類似度が高い条件であり、/finetune での diverse NEG 追加で対処する。
 
 ---
 
@@ -160,90 +215,32 @@ few-shot 例示のみでは LFM 2.5-VL-450M には困難であることを確認
 
 - **時間オフセット負例の効果**: 同一地点・180日前という設計により、burn scar 以外の土地被覆差
   が排除され、モデルが burn scar シグナルに集中して学習できた。
+- **GT 簡素化の効果**: `fire_detected` のみの GT にしたことで、モデルが視覚パターンから
+  直接 FIRE/NO-FIRE を学習する純粋な分類タスクになった。
 - **アシスタントトークンのみで loss 計算**: prefix (system + user) を -100 でマスクし、
   アシスタント応答部分のみ loss を計算することで、効率的なラベル学習ができた。
 
-### 残課題 (/spec〜/build に向けて)
+### /finetune に向けた残課題
 
 | # | 課題 | 深刻度 |
 |---|---|---|
-| A | 精度目標未達 (Recall=0.75, 目標=0.85) | **高** |
-| B | テストサンプル数が少ない (8 件) → 統計的信頼性が低い | **高** |
-| C | **訓練・評価データが FIRMS 検知地点に偏っている → 汎化性能が未検証** | **高** |
-| D | FT前 zero-shot が退化解 (全件FIRE) → 本番でのベースライン特性の懸念 | **中** |
-| E | 見逃し 1 件 (POS#23, FRP=108MW) の原因分析未実施 | **低** |
+| A | テストセット過適合リスク (同一 FIRMS 構造) — 汎化 FP Rate が実態指標 | **高** |
+| B | 汎化テスト 14 件のみ — 統計的信頼性が低い | **高** |
+| C | 精度目標 Recall > 0.85 は達成 (1.00) だが、サンプル数が少なく信頼区間が広い | **中** |
+| D | FP 2 件 (Black Forest, Kenya savanna) の原因が視覚的類似によるもので未解消 | **中** |
 
-#### 課題 C の詳細: データ分布の偏り
-
-現在の設計では POS・NEG ともに FIRMS 検知地点を起点としているため、
-学習・評価データはすべて「過去に火災が発生したことのある場所」に限定されている。
-
-実運用では衛星が通過するすべての地域（火災履歴のない森林・農地・湿地・都市郊外など）
-に対して正確に判断する必要がある。現在のモデルは burn scar の視覚特徴を学習しているが、
-火災非経験地域での FP Rate が未知であり、精度目標 (FP Rate < 0.15) を実際に満たすかは不明。
-
-**対処方針 (/data〜/build)**:
-- 負例に FIRMS 検知地点以外の多様な地域（バイオーム・土地被覆クラスを分散）を加える
-- 本格 FT 後に、火災非経験地域のみのテストセットで FP Rate を別途評価する
-- 訓練サンプル数の大幅な拡充（/poc2 の 20 件 → /build では数百件規模を目標）
-
-残課題 A・B・C は /data で学習データを拡張し、/build で本格 FT を行うことで対処する。
+**対処方針 (/finetune)**:
+- 負例に diverse NEG (多バイオーム・乾季/雨季バリエーション) を意図的に追加
+- 本格 FT 後に FIRMS 非関連地域のみのテストセットで FP Rate を別途評価
+- 訓練サンプル数の大幅拡充 (32 件 → 数百件規模)
+- `/finetune` でも GT は `{"fire_detected": bool}` 単フィールドを維持
 
 ---
 
-## 追加検証: 汎化確認 (FIRMS 非関連地点での FP Rate)
-
-### 目的
-
-訓練・評価データが FIRMS 検知地点に偏っているという課題 C を定量的に検証するため、
-FIRMS と無関係な 16 地点（森林・農地・砂漠・都市・湿地・サバンナ・海洋）で
-LoRA FT 後のモデルに推論させ、FP Rate を計測した。
-
-### 結果
-
-| カテゴリ | 地点 | 結果 |
-|---|---|---|
-| 森林 | Canada boreal forest (Manitoba) | ✅ TN |
-| 森林 | Brazil deep Amazon | ✅ TN |
-| 農地 | France agricultural land | ✅ TN |
-| 草地 | Ireland grassland | ✅ TN |
-| 砂漠 | Sahara Desert (Algeria) | ✅ TN |
-| 都市 | Tokyo suburban area | ✅ TN |
-| 森林 | Germany Black Forest | ❌ FP |
-| 農地 | Japan rice paddies (Aichi) | ❌ FP |
-| 砂漠 | Arabian Peninsula (Saudi Arabia) | ❌ FP |
-| 砂漠 | Australian outback | ❌ FP |
-| 都市 | London suburbs | ❌ FP |
-| 湿地 | Bangladesh Ganges delta | ❌ FP |
-| サバンナ | Kenya savanna (rainy season) | ❌ FP |
-| 海洋 | Indian Ocean | ❌ FP |
-| 海洋 | North Pacific Ocean | ⚠️ 画像なし (スキップ) |
-| 海洋 | North Atlantic Ocean | ⚠️ 画像なし (スキップ) |
-
-**有効サンプル: 14件 / FP: 8件 / FP Rate: 0.57 → 精度目標 (≤0.15) 未達**
-
-### 考察
-
-- FP は特定カテゴリに偏らず、砂漠・都市・湿地・サバンナと広範に発生している
-- 6 件が正しく TN と判定されており、「何でも FIRE と言う」退化解ではない
-- **FT で burn scar の特徴を一部学習したが、burn scar に似た見た目を持つ多様な土地被覆を
-  区別する能力は不十分**
-- 海洋 (North Pacific / Atlantic) は Sentinel-2 の系統的撮像対象外のため画像なし
-
-### /data・/build への示唆
-
-訓練データの負例として、火災履歴のない多様な地域を意図的に含める必要がある。
-特に以下のカテゴリは FP が出やすく、優先的に負例として追加すること:
-- 乾燥地・砂漠 (Arabian Peninsula, Australian outback)
-- 湿地・デルタ地帯 (Bangladesh)
-- サバンナ (ただし FIRMS 非検知地点に限定)
-- 都市郊外 (London 相当)
-
----
-
-## /spec 入場条件
+## /finetune 入場条件
 
 - [x] /poc 完了 (スペクトルシグナルの分離確認済み)
-- [x] /poc2 完了 (LoRA FT 有効性確認済み)
+- [x] /poc2 Step1 完了 (ICL baseline 確立: Recall=0.00)
+- [x] /poc2 Step2 完了 (LoRA FT 有効性確認済み: Recall=1.00, 汎化 FP Rate=0.14)
 
-**→ /spec に進む。**
+**→ /finetune に進む。**
