@@ -103,6 +103,7 @@ class SpectralProcessor:
         # NBR2 = (swir16 - swir22) / (swir16 + swir22)
         nbr2_arr = (swir16 - swir22) / (swir16 + swir22 + eps)
         nbr2 = float(np.nanmean(nbr2_arr))
+        nbr2_min = float(np.nanmin(nbr2_arr))   # 火炎ピクセルに感応 (poc2 と同じ)
 
         # NDVI = (nir - red) / (nir + red)
         ndvi_arr = (nir - red) / (nir + red + eps)
@@ -113,6 +114,7 @@ class SpectralProcessor:
         bai = float(np.nanmean(bai_arr))
 
         mean_swir22 = float(np.nanmean(swir22))
+        swir22_max  = float(np.nanmax(swir22))   # 熱異常ピクセルに感応 (poc2 と同じ)
 
         # 火災画素比率
         fire_mask = (nbr2_arr < NBR2_FIRE_THRESHOLD) & (swir22 > SWIR22_FIRE_MIN)
@@ -120,9 +122,11 @@ class SpectralProcessor:
 
         return SpectralIndices(
             nbr2=nbr2,
+            nbr2_min=nbr2_min,
             ndvi=ndvi,
             bai=bai,
             mean_swir22=mean_swir22,
+            swir22_max=swir22_max,
             fire_pixel_ratio=fire_pixel_ratio,
         )
 
@@ -151,12 +155,21 @@ class SpectralProcessor:
         out = np.empty_like(arr, dtype=np.float32)
 
         if per_band:
-            for c in range(arr.shape[2]):
+            # SWIR22(ch0) と SWIR16(ch1) は共有スケールで正規化し、バンド間比を保持する。
+            # 独立正規化では弱火炎の SWIR22>SWIR16 差分が圧縮され、burn scar の赤色が消える。
+            swir = arr[:, :, :2]
+            vmin = float(np.nanpercentile(swir, lo))
+            vmax = float(np.nanpercentile(swir, hi))
+            span = vmax - vmin if vmax > vmin else 1.0
+            out[:, :, 0] = (arr[:, :, 0] - vmin) / span
+            out[:, :, 1] = (arr[:, :, 1] - vmin) / span
+            # NIR 以降は独立
+            for c in range(2, arr.shape[2]):
                 ch = arr[:, :, c]
-                vmin = float(np.nanpercentile(ch, lo))
-                vmax = float(np.nanpercentile(ch, hi))
-                span = vmax - vmin if vmax > vmin else 1.0
-                out[:, :, c] = (ch - vmin) / span
+                vmin_c = float(np.nanpercentile(ch, lo))
+                vmax_c = float(np.nanpercentile(ch, hi))
+                span_c = vmax_c - vmin_c if vmax_c > vmin_c else 1.0
+                out[:, :, c] = (ch - vmin_c) / span_c
         else:
             vmin = float(np.nanpercentile(arr, lo))
             vmax = float(np.nanpercentile(arr, hi))
