@@ -43,10 +43,10 @@ from transformers import AutoModelForImageTextToText, AutoProcessor
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.interfaces import FIRE_DETECTION_SYSTEM_PROMPT, FIRE_DETECTION_USER_PROMPT
+from src.interfaces import FIRE_DETECTION_SYSTEM_PROMPT, FIRE_DETECTION_FT_PROMPT
 
 MODEL_ID = "LiquidAI/LFM2.5-VL-450M"
-EVAL_OUT = ROOT / "data" / "build" / "eval"
+EVAL_OUT = ROOT / "data" / "finetune" / "eval"
 
 # generalization test 用地点 (dataset_builder.py と同一リスト)
 from finetune.dataset_builder import DIVERSE_NEG_LOCATIONS
@@ -68,24 +68,16 @@ def _extract_json(text: str) -> dict | None:
     return None
 
 
-def _build_messages(image: Image.Image, nbr2: float = 0.0, ndvi: float = 0.0,
-                    bai: float = 0.0, mean_swir22: float = 0.0,
-                    fire_pixel_ratio: float = 0.0) -> list[dict]:
-    user_text = FIRE_DETECTION_USER_PROMPT.format(
-        nbr2=nbr2, ndvi=ndvi, bai=bai,
-        mean_swir22=mean_swir22, fire_pixel_ratio=fire_pixel_ratio,
-    )
+def _build_messages(image: Image.Image) -> list[dict]:
     return [
-        {"role": "system",  "content": [{"type": "text",  "text": FIRE_DETECTION_SYSTEM_PROMPT}]},
-        {"role": "user",    "content": [{"type": "image", "image": image},
-                                        {"type": "text",  "text": user_text}]},
+        {"role": "system", "content": [{"type": "text",  "text": FIRE_DETECTION_SYSTEM_PROMPT}]},
+        {"role": "user",   "content": [{"type": "image", "image": image},
+                                       {"type": "text",  "text": FIRE_DETECTION_FT_PROMPT}]},
     ]
 
 
-def run_inference(model, processor, image: Image.Image, device: str = "cuda",
-                  nbr2: float = 0.0, ndvi: float = 0.0, bai: float = 0.0,
-                  mean_swir22: float = 0.0, fire_pixel_ratio: float = 0.0) -> dict:
-    messages = _build_messages(image, nbr2, ndvi, bai, mean_swir22, fire_pixel_ratio)
+def run_inference(model, processor, image: Image.Image, device: str = "cuda") -> dict:
+    messages = _build_messages(image)
     inputs = processor.apply_chat_template(
         messages,
         add_generation_prompt=True,
@@ -110,7 +102,7 @@ def evaluate_on_test(model, processor, test_ds, label: str,
                      device: str = "cuda") -> dict:
     """held-out test set で Recall/Precision/F1/FP Rate を計測。"""
     model.eval()
-    preds, confs, gt_labels = [], [], []
+    preds, gt_labels = [], []
     latencies = []
     json_ok = 0
 
@@ -120,17 +112,11 @@ def evaluate_on_test(model, processor, test_ds, label: str,
             img = Image.fromarray(img)
 
         t0 = time.perf_counter()
-        result = run_inference(
-            model, processor, img, device,
-            nbr2=float(ex.get("nbr2", 0)),
-            mean_swir22=float(ex.get("mean_swir22", 0)),
-        )
+        result = run_inference(model, processor, img, device)
         latencies.append((time.perf_counter() - t0) * 1000)
 
-        fire_pred  = bool(result.get("fire_detected", False))
-        confidence = float(result.get("fire_confidence", 0.5))
+        fire_pred = bool(result.get("fire_detected", False))
         preds.append(int(fire_pred))
-        confs.append(confidence)
         gt_labels.append(int(ex["label"]))
         if result:
             json_ok += 1
@@ -160,7 +146,6 @@ def evaluate_on_test(model, processor, test_ds, label: str,
         "lat_mean":  float(np.mean(latencies)),
         "lat_p95":   float(np.percentile(latencies, 95)),
         "preds":     preds_arr.tolist(),
-        "confs":     np.array(confs).tolist(),
         "gt":        gt_arr.tolist(),
         "cm":        confusion_matrix(gt_arr, preds_arr).tolist(),
     }
@@ -213,11 +198,7 @@ def evaluate_generalization(model, processor, device: str = "cuda") -> dict:
 
         scene = spectral.process(resp)
         t0 = time.perf_counter()
-        result = run_inference(
-            model, processor, scene.fire_composite, device,
-            nbr2=float(scene.indices.nbr2),
-            mean_swir22=float(scene.indices.mean_swir22),
-        )
+        result = run_inference(model, processor, scene.fire_composite, device)
         ms = (time.perf_counter() - t0) * 1000
 
         fire_pred = bool(result.get("fire_detected", False))
@@ -374,7 +355,7 @@ def print_report(base: dict, ft: dict,
         print(f"  {'FP Rate':<30} {b_rate:>10.3f} {f_rate:>10.3f}  {sign}{f_rate-b_rate:.3f}")
         print(f"  Valid samples: {gen_ft['n_valid']}/{gen_ft['n_total']}")
         ok = f_rate <= 0.30
-        print(f"\n  {'✅' if ok else '❌'}  Generalization FP Rate: {f_rate:.2f} (目標 ≤0.30, poc2実績=0.57)")
+        print(f"\n  {'✅' if ok else '❌'}  Generalization FP Rate: {f_rate:.2f} (目標 ≤0.30, poc2実績=0.14)")
         print("=" * 60)
 
 
@@ -388,13 +369,17 @@ def main():
                    default=str(ROOT / "output" / "fireedge-lora" / "adapter"),
                    help="LoRA adapter ディレクトリ")
     p.add_argument("--device",       type=str, default="cuda")
-    p.add_argument("--skip-gen",     action="store_true",
+    p.add_argument("--skip-gen",  action="store_true",
                    help="generalization test をスキップ")
-    p.add_argument("--skip-base",    action="store_true",
-                   help="base model 評価をスキップ (adapter のみ評価)")
+    p.add_argument("--skip-base", action="store_true", default=True,
+                   help="base model 評価をスキップ (adapter のみ評価、デフォルト: スキップ)")
+    p.add_argument("--run-base", action="store_true",
+                   help="base model も評価する (--skip-base を上書き)")
     args = p.parse_args()
+    if args.run_base:
+        args.skip_base = False
 
-    ds_path = ROOT / "data" / "build" / "hf_dataset"
+    ds_path = ROOT / "data" / "finetune" / "hf_dataset"
     if not ds_path.exists():
         print(f"[ERROR] dataset が見つかりません: {ds_path}")
         sys.exit(1)

@@ -58,7 +58,7 @@ def main():
     print("=" * 60)
 
     # ---------------------------------------------------------------- dataset
-    ds_path = Path(ROOT) / "data" / "build" / "hf_dataset"
+    ds_path = Path(cfg.dataset_dir)
     if not ds_path.exists():
         print(f"[ERROR] dataset が見つかりません: {ds_path}")
         print("  先に `uv run python -m finetune.dataset_builder` を実行してください。")
@@ -124,7 +124,7 @@ def main():
         seed=cfg.seed,
         # SFT 固有: テキストフィールドは collator で処理するので None
         dataset_text_field=None,
-        max_seq_length=cfg.max_seq_length,
+        max_length=cfg.max_seq_length,  # trl>=1.1.0: max_seq_length → max_length
     )
 
     # ---------------------------------------------------------------- trainer

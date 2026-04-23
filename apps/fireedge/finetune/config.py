@@ -16,7 +16,7 @@ class FinetuneConfig:
 
     # ---------------------------------------------------------------- dataset
     max_cloud_cover: float = 50.0    # 雲量上限 [%]
-    dataset_dir: str = "data/build/hf_dataset"
+    dataset_dir: str = "data/finetune/hf_dataset"
     image_size: int = 448
 
     # ------------------------------------------------------------------ LoRA
@@ -36,7 +36,7 @@ class FinetuneConfig:
     lora_dropout: float = 0.05
 
     # --------------------------------------------------------------- training
-    num_train_epochs: int = 3
+    num_train_epochs: int = 5
     per_device_train_batch_size: int = 1
     gradient_accumulation_steps: int = 8   # effective batch = 8
     learning_rate: float = 2e-4
