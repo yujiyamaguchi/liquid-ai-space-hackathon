@@ -13,9 +13,9 @@
 | **Early Adopter** | 衛星オペレーター・民間林業会社 | **P&C 損害保険会社（Swiss Re・Tokio Marine 等）** | 制裁コンプライアンス SaaS・トレードファイナンス銀行 | シンガポール系トレードファイナンス銀行 | トレードファイナンス銀行・代替データプロバイダー | 自然災害保険会社（査定部門） | GBRMPA | DPhi Space / 小型コンステレーション |
 | **ストレージ活用** | アラートキュー（~10MB） | **NBR/NDVI 時系列統計（~1.5MB/シーン）+ Few-shot参照画像** | AOI ベースライン画像（T0参照） | **T0 タンク画像（差分検知の基準、~33MB）** | AOI ベースライン + 入港頻度時系列 | 洪水前基準道路画像 | 礁ごとのB3/B4基準値 + Few-shot参照 | **Few-shot参照画像（4クラス×5枚 ~18MB）** |
 | **ダウンリンク形式** | JSON 2KB + SWIR thumbnail（任意 ~50KB） | GeoJSON リスクマップ（~10〜50KB） | JSON 2KB + RGB thumbnail（任意 ~50KB） | JSON 2KB（在庫変動アラート） | JSON + 入港頻度時系列（~5〜10KB） | GeoJSON リスクマップ（~10〜50KB） | GeoJSON 白化マスク（~10〜50KB） | JSON 優先度リスト（~2KB） |
-| **Critic スコア** | **69点** | **65点** | **67点** | **63点** | **63点** | **58点** | **57点** | **62点** |
-| **Critic 判定** | **Go** | **Go** | **Go** | **Go** | **Go** | **Go** | **Go** | **Go** |
-| **フェーズ** | **/poc2 完了** | **/ideate 完了** | /ideate 完了 | /ideate 完了 | /ideate 完了 | /ideate 完了 | /ideate 完了 | /ideate 完了 |
+| **Critic スコア** | **58点** | **65点** | **67点** | **63点** | **63点** | **58点** | **57点** | **62点** |
+| **Critic 判定** | **技術デモ** | **Go** | **Go** | **Go** | **Go** | **Go** | **Go** | **Go** |
+| **フェーズ** | **技術デモ（/poc2完了）→ FireGuard へ継承** | **/ideate 完了** | /ideate 完了 | /ideate 完了 | /ideate 完了 | /ideate 完了 | /ideate 完了 | /ideate 完了 |
 
 ### FireGuard Critic 変遷
 - 初回評価: **62点・Go（条件付き）**（LFM vs RF の差別化不明・デモ地域が PoC リスク高・直接競合未記載）
@@ -31,9 +31,22 @@
 - 修正後: **62点・Go**（4点すべて lean_canvas に反映済み）
 - 主な修正: DPhi Space を Early Adopter #1 に設定・φ-sat 帯域削減率 25% vs 80% の定量比較追加・GT を FireEdge+InfraWatch と共有する設計明記・デモシナリオ固定
 
-### FireEdge Critic 変遷
-- 正式評価: **69点・Go**（全案トップ）
-- 残課題（/finetune 対処中）: FPR 目標 0.15 未達（現状 0.244〜0.300）。active fire only + SWIR+RGB 2枚で解決見込み
+### FireEdge の位置づけ変更（2026-04-25）
+
+**提出アプリとしての UVP が成立しないと判断し、技術デモに位置づけ変更。**
+
+問題の積み重ね:
+1. Sentinel-2 の 5〜10 日リビジットでは「早期検知」は成立しない（VIIRS が 1 日 2〜4 回先に検知）
+2. 「野焼き vs 山火事」の判別は PoC2 で未検証
+3. Burn scar mapping に UVP 転換しようとしたが、20m GT（MODIS 500m・dNBR 循環・手動注釈の各問題）が解決できない
+
+**FireEdge が残すもの（FireGuard へ継承）:**
+- Sentinel-2 SWIR パイプライン（SimSat API → 疑似カラー合成）
+- LFM 2.5-VL-450M LoRA FT インフラ（dataset_builder・train・evaluate の実装）
+- FIRMS GT パイプライン（発火座標 × SimSat 画像照合）→ FireGuard の「発火 N 日前 GT」として再利用
+- PoC2 で「LFM FT が衛星画像で有効」と定量的に実証（FireGuard の FT 根拠）
+
+スコア: **58点**（技術実装の完成度は高いが、商業的 UVP は成立しない）
 
 ### HarborLens Critic 変遷
 - 初回評価: **60点・Go（条件付き）**（自己 GT 循環・LFM 役割曖昧・荷役活動の 10m 問題）

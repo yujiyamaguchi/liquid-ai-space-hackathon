@@ -120,21 +120,27 @@
 
 ---
 
-## /critic 評価
+## /critic 評価・位置づけ変更（2026-04-25）
 
-**総合判定: Go — 69点**（全案トップ。残課題は /finetune の FPR 達成のみ）
+**当初判定: Go — 69点 → 再評価: 技術デモ — 58点**
 
-**強み**
-1. 問題の定量化が全案最強（2023年カナダ 1,840万ha・FIRMS 375m/9〜15h 遅延という数値）
-2. LFM 付加価値が最も明確（「計画的野焼き vs 山火事」の文脈判断は閾値処理不可）
-3. 競合比較が定量的（FIRMS・OroraTech・GOES・Planet との横並び表完成）
+### UVP が成立しない理由（最終判断）
 
-**残存課題（/finetune で対処中）**
-- FPR 目標 < 0.15 未達成（現状 0.244〜0.300）。burn scar 汚染が根本原因
-- 対策: active fire only プロンプト変更（方針A）+ SWIR+RGB 2枚入力（方針B）
+1. **5〜10 日リビジット vs VIIRS 1日 2〜4 回**: 火災は既に VIIRS が検知済みの状態で Sentinel-2 が通過する。「早期検知」は成立しない
+2. **野焼き vs 山火事の判別が未検証**: PoC2 で検証したのは「FIRMS 確認済み火災 vs 非火災」の2クラスのみ。野焼きをネガティブサンプルとした学習は未実施
+3. **Burn scar mapping に転換しようとしたが GT が成立しない**: MODIS 500m（解像度不足）・dNBR 閾値（循環参照）・手動注釈（工数超過）のいずれも実用的でない
 
-**lean_canvas 推奨追記**
-- UVP に「昼間通過専用（地方時 10:30 限定）」「VIIRS の夜間・広域を補完するポジション」を明示すること
+### FireEdge が FireGuard に継承するもの
 
-**ポジション**
-FireEdge (69pt) > DarkFleet (67pt) > OrbitTriage (62pt) > HarborLens (60pt) > PortPulse (57pt) > InfraWatch (53pt) > CoralShield (52pt)
+FireEdge の技術成果は破棄しない。**FireGuard の FT 根拠として活用する。**
+
+| 資産 | 継承先での用途 |
+|---|---|
+| Sentinel-2 SWIR パイプライン（SimSat API → 疑似カラー合成） | FireGuard の NIR/SWIR パイプラインに転用 |
+| LFM 2.5-VL-450M LoRA FT インフラ（dataset_builder・train・evaluate） | FireGuard の FT にそのまま使用 |
+| FIRMS GT パイプライン（発火座標 × SimSat 画像取得） | FireGuard の「発火 N 日前シーン取得」に直接再利用 |
+| **PoC2 での定量的実証**（FT 有効性確認・LoRA で few-shot 超え） | 「LFM FT が Sentinel-2 画像で有効」という FireGuard の技術前提を裏付ける |
+
+### デモ上の位置づけ
+
+FireEdge の技術実装（FT パイプライン・推論コード）は README または動画デモで「FireGuard の FT 手法を先行検証したプロセス」として示す。ハッカソン審査員への技術説明力（配点 20%）を補強するための証拠として機能させる。
