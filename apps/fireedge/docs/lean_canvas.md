@@ -117,3 +117,24 @@
 ## 競合の全体像
 
 詳細は上記「競合検知手法の比較」テーブルを参照。
+
+---
+
+## /critic 評価
+
+**総合判定: Go — 69点**（全案トップ。残課題は /finetune の FPR 達成のみ）
+
+**強み**
+1. 問題の定量化が全案最強（2023年カナダ 1,840万ha・FIRMS 375m/9〜15h 遅延という数値）
+2. LFM 付加価値が最も明確（「計画的野焼き vs 山火事」の文脈判断は閾値処理不可）
+3. 競合比較が定量的（FIRMS・OroraTech・GOES・Planet との横並び表完成）
+
+**残存課題（/finetune で対処中）**
+- FPR 目標 < 0.15 未達成（現状 0.244〜0.300）。burn scar 汚染が根本原因
+- 対策: active fire only プロンプト変更（方針A）+ SWIR+RGB 2枚入力（方針B）
+
+**lean_canvas 推奨追記**
+- UVP に「昼間通過専用（地方時 10:30 限定）」「VIIRS の夜間・広域を補完するポジション」を明示すること
+
+**ポジション**
+FireEdge (69pt) > DarkFleet (67pt) > OrbitTriage (62pt) > HarborLens (60pt) > PortPulse (57pt) > InfraWatch (53pt) > CoralShield (52pt)
