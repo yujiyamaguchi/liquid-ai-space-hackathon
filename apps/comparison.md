@@ -1,6 +1,6 @@
 # アプリ案比較表
 
-> **ハードウェア基準**: Jetson Orin NX（RAM 16GB、175 TOPS INT8、1GB in-space storage）。詳細は [docs/onboard_hardware.md](../docs/onboard_hardware.md) を参照。
+> **ハードウェア基準**: Jetson Orin NX（RAM 16GB、175 TOPS INT8、テラバイト単位ストレージ）。詳細は [docs/onboard_hardware.md](../docs/onboard_hardware.md) を参照。Winner Prize の「1GB/月」はクレジット割り当て量であり、ハードウェア実容量とは別。
 
 ## 進行中・検討中
 
