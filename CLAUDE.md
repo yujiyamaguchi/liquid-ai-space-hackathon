@@ -53,6 +53,20 @@
 - **Package Manager**: uv
 - **Model**: LFM 2.5-VL-450M (Grounding & Structured Output 優先)
 
+## Infrastructure — 接続情報
+
+### SimSat (DPhi Space 衛星シミュレータ)
+- **データ API**: `http://localhost:9005/` — Sentinel-2 データ取得エンドポイント
+- **ヘルスチェック**: `curl http://localhost:9005/` → `{"message":"Simulation API is online"}` で正常確認
+- **起動**: `cd /home/yamag/SimSat && docker compose up -d`
+- **SimSat が動いているかの確認は常に `http://localhost:9005/` で行うこと**
+
+### FIRMS API (NASA 野火 GT データ)
+- **API キー**: ルートの `.env` に `FIRMS_API_KEY` として記載
+  - コードからは `os.environ.get("FIRMS_MAP_KEY") or os.environ.get("FIRMS_API_KEY")` で読む
+- **エンドポイント**: `https://firms.modaps.eosdis.nasa.gov/api/area/csv/{KEY}/{PRODUCT}/{BBOX}/{DAYS}`
+- **プロダクト**: `VIIRS_SNPP_NRT`（直近5日）、`VIIRS_SNPP_SP`（アーカイブ）
+
 ## Key Principles (SDD & Edge-First & Domain Honesty)
 1. **Domain Honesty（衛星・事業知識の誠実さ）**:
    - 衛星スペクトル特性・軌道力学について不確かな点は推測せず、[docs/spectral_background.md](docs/spectral_background.md)（概念・精度指針）または [docs/sentinel2_guide.md](docs/sentinel2_guide.md)（バンド仕様・SimSat詳細）、各アプリの `docs/` を参照するか「要確認」と明示すること
