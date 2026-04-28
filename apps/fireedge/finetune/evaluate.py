@@ -1,21 +1,17 @@
 """
 FireEdge Base vs Fine-Tuned 精度比較
 ======================================
-held-out test set と generalization test set (DIVERSE_NEG) で評価する。
+held-out test set で Recall / Precision / F1 / FP Rate を評価する。
 
-評価の二層構造:
-  Layer 1 - Test set (in-distribution):
-    FIRMS地点由来の POS + temporal NEG + 一部 diverse NEG
-    → Recall / Precision / F1 / FP Rate を base vs fine-tuned で比較
-
-  Layer 2 - Generalization test (out-of-distribution):
-    DIVERSE_NEG_LOCATIONS 16地点 (訓練データとは独立)
-    → FP Rate のみ計測 (全件 GT=NO-FIRE)
+データ構成 (目標):
+  POS 100件 + firms_NEG 100件 + diverse_NEG 100件 = 計300件
+  Train 70% / Val 15% / Test 15%  (stratified by label)
 
 使い方:
     cd apps/fireedge
     uv run python -m finetune.evaluate
     uv run python -m finetune.evaluate --adapter output/fireedge-lora/adapter
+    uv run python -m finetune.evaluate --run-base   # base model も評価
 """
 from __future__ import annotations
 
@@ -48,8 +44,6 @@ from src.interfaces import FIRE_DETECTION_SYSTEM_PROMPT, FIRE_DETECTION_FT_PROMP
 MODEL_ID = "LiquidAI/LFM2.5-VL-450M"
 EVAL_OUT = ROOT / "data" / "finetune" / "eval"
 
-# generalization test 用地点 (dataset_builder.py と同一リスト)
-from finetune.dataset_builder import DIVERSE_NEG_LOCATIONS
 
 
 # ===========================================================================
@@ -155,70 +149,6 @@ def evaluate_on_test(model, processor, test_ds, label: str,
 # Layer 2: Generalization test (FP Rate on out-of-distribution NEG)
 # ===========================================================================
 
-def evaluate_generalization(model, processor, device: str = "cuda") -> dict:
-    """
-    DIVERSE_NEG_LOCATIONS 16地点で FP Rate を計測。
-    全件 GT=NO-FIRE なので FP Rate のみが評価指標。
-    訓練データとは完全に独立。
-    """
-    import os
-    from src.data_fetcher import SimSatClient
-    from src.spectral import SpectralProcessor
-
-    # .env ロード
-    _env = ROOT / ".." / ".." / ".env"
-    if _env.exists():
-        for line in _env.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip())
-
-    client   = SimSatClient()
-    spectral = SpectralProcessor()
-    WINDOW_SEC = 12 * 86400
-
-    results = []
-    for loc in DIVERSE_NEG_LOCATIONS:
-        try:
-            resp = client.fetch_fire_scene(
-                lon=loc["lon"], lat=loc["lat"], timestamp=loc["ts"],
-                size_km=5, window_seconds=WINDOW_SEC,
-            )
-        except Exception as e:
-            results.append({"desc": loc["desc"], "status": "error", "pred": None})
-            print(f"  ⚠️  [{loc['desc']}] error: {e}")
-            continue
-
-        if not resp.image_available or resp.image_array is None:
-            results.append({"desc": loc["desc"], "status": "no_image", "pred": None})
-            cc = f"{resp.cloud_cover:.0f}%" if resp.cloud_cover is not None else "?"
-            print(f"  ⚠️  [{loc['desc']}] 画像なし (cc={cc})")
-            continue
-
-        scene = spectral.process(resp)
-        t0 = time.perf_counter()
-        result = run_inference(model, processor, scene.fire_composite, device)
-        ms = (time.perf_counter() - t0) * 1000
-
-        fire_pred = bool(result.get("fire_detected", False))
-        mark = "❌ FP" if fire_pred else "✅ TN"
-        print(f"  {mark}  [{loc['desc']}]  pred={'FIRE' if fire_pred else 'NO-FIRE'} ({ms:.0f}ms)")
-        results.append({"desc": loc["desc"], "status": "ok", "pred": fire_pred})
-
-    valid = [r for r in results if r["status"] == "ok"]
-    fp    = sum(1 for r in valid if r["pred"])
-    fp_rate = fp / len(valid) if valid else 0.0
-
-    return {
-        "n_total":  len(DIVERSE_NEG_LOCATIONS),
-        "n_valid":  len(valid),
-        "n_fp":     fp,
-        "fp_rate":  fp_rate,
-        "details":  results,
-    }
-
-
 # ===========================================================================
 # 出力・可視化
 # ===========================================================================
@@ -305,8 +235,7 @@ def plot_comparison(base: dict, ft: dict, out_dir: Path):
     return fig_path
 
 
-def print_report(base: dict, ft: dict,
-                 gen_base: dict | None = None, gen_ft: dict | None = None):
+def print_report(base: dict, ft: dict):
     print("\n" + "=" * 60)
     print("EVALUATION RESULTS — Test Set (in-distribution)")
     print("=" * 60)
@@ -343,20 +272,6 @@ def print_report(base: dict, ft: dict,
 
     print("=" * 60)
 
-    if gen_base and gen_ft:
-        print("\n" + "=" * 60)
-        print("GENERALIZATION TEST (out-of-distribution FP Rate)")
-        print("=" * 60)
-        print(f"  {'':30s} {'Base':>10} {'LoRA':>10}")
-        print("-" * 52)
-        b_rate = gen_base["fp_rate"]
-        f_rate = gen_ft["fp_rate"]
-        sign = "+" if f_rate >= b_rate else ""
-        print(f"  {'FP Rate':<30} {b_rate:>10.3f} {f_rate:>10.3f}  {sign}{f_rate-b_rate:.3f}")
-        print(f"  Valid samples: {gen_ft['n_valid']}/{gen_ft['n_total']}")
-        ok = f_rate <= 0.30
-        print(f"\n  {'✅' if ok else '❌'}  Generalization FP Rate: {f_rate:.2f} (目標 ≤0.30, poc2実績=0.14)")
-        print("=" * 60)
 
 
 # ===========================================================================
@@ -369,8 +284,6 @@ def main():
                    default=str(ROOT / "output" / "fireedge-lora" / "adapter"),
                    help="LoRA adapter ディレクトリ")
     p.add_argument("--device",       type=str, default="cuda")
-    p.add_argument("--skip-gen",  action="store_true",
-                   help="generalization test をスキップ")
     p.add_argument("--skip-base", action="store_true", default=True,
                    help="base model 評価をスキップ (adapter のみ評価、デフォルト: スキップ)")
     p.add_argument("--run-base", action="store_true",
@@ -403,10 +316,6 @@ def main():
         print("[Eval] Base model — Test set 評価中 ...")
         base_results = evaluate_on_test(base_model, processor, test_ds, "Base LFM2.5-VL", device)
 
-        if not args.skip_gen:
-            print("\n[Eval] Base model — Generalization test ...")
-            gen_base = evaluate_generalization(base_model, processor, device)
-
         del base_model
         torch.cuda.empty_cache()
     else:
@@ -430,33 +339,24 @@ def main():
     print("[Eval] Fine-tuned model — Test set 評価中 ...")
     ft_results = evaluate_on_test(ft_model, processor, test_ds, "FireEdge LoRA", device)
 
-    gen_ft = None
-    if not args.skip_gen:
-        print("\n[Eval] Fine-tuned model — Generalization test ...")
-        gen_ft = evaluate_generalization(ft_model, processor, device)
-
     del ft_model
     torch.cuda.empty_cache()
 
     # --- Report ---
     if base_results:
-        print_report(base_results, ft_results, gen_base, gen_ft)
+        print_report(base_results, ft_results)
         plot_comparison(base_results, ft_results, EVAL_OUT)
     else:
         print("\n[Eval] Fine-tuned only:")
         for key in ["precision", "recall", "f1", "fp_rate", "accuracy"]:
             print(f"  {key}: {ft_results[key]:.3f}")
-        if gen_ft:
-            print(f"  Generalization FP Rate: {gen_ft['fp_rate']:.3f}")
 
     # --- JSON 保存 ---
     results_path = EVAL_OUT / "results.json"
     with open(results_path, "w") as fh:
         json.dump({
-            "base":        base_results,
-            "finetuned":   ft_results,
-            "gen_base":    gen_base,
-            "gen_ft":      gen_ft,
+            "base":      base_results,
+            "finetuned": ft_results,
         }, fh, indent=2)
     print(f"\n[Eval] 結果を保存: {results_path}")
 

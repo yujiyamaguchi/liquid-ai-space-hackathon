@@ -4,14 +4,15 @@ FireEdge /finetune Dataset Builder
 FIRMS API → SimSat → SWIR composite → Train/Val/Test JSONL
 
 データ設計:
-  POS          : FIRMS VIIRS_SNPP_NRT 検知座標 → SimSat (検知日+SHIFT_DAYS, Δ≥0)
+  POS          : FIRMS VIIRS_SNPP_SP 検知座標 → SimSat (検知日+SHIFT_DAYS, Δ≥0)
+                 固定期間 FIRMS_TRAIN_START から FIRMS_TRAIN_WINDOW 日間 (再現可能)
   NEG temporal : 同座標 → SimSat (検知日-NEG_OFFSET_DAYS)  ← burn scar シグナルのみを差異とする
-  NEG diverse  : FP-prone バイオーム 45件 (砂漠10, 都市8, 湿地8, サバンナ8, 温帯森林6, 農地5)
-                 乾季 timestamp 優先 (SWIR 高反射で burn scar と混同されやすい条件を意図的に追加)
+  NEG diverse  : DIVERSE_NEG_CANDIDATES (~200件) から cloud≤50% で最大 DIVERSE_NEG_TARGET 件収集
+                 全球ランダムグリッド (seed=42) + 手動追加 — 意図的なバイオーム選択はしない
 
 分割:
   Train 70% / Val 15% / Test 15%  (stratified by label)
-  Generalization test: DIVERSE_NEG_LOCATIONS 16地点 (データセットとは独立)
+  目標: POS 100 / firms_NEG 100 / diverse_NEG 100 = 計300件
 
 使い方:
     cd apps/fireedge
@@ -72,76 +73,99 @@ FIRMS_AREAS = {
     "us_west":      "-125,35,-105,50",
     "siberia":      "80,50,130,65",
 }
-FIRMS_PRODUCT = "VIIRS_SNPP_NRT"
+FIRMS_PRODUCT        = "VIIRS_SNPP_SP"
+FIRMS_TRAIN_START    = "2025-02-01"   # 固定開始日 (再現性のため変更しない)
+FIRMS_TRAIN_WINDOW   = 60             # 取得期間 [日] (2025-02-01 〜 2025-04-01)
+DIVERSE_NEG_TARGET   = 100            # diverse_neg 収集目標件数
 
-# poc2 汎化確認でFP-proneだったカテゴリを優先的に追加
+# confidence フィルタ: NRT="nominal"/"high", SP="n"/"h" (略記) を両方受け入れる
+FIRMS_CONF_OK = {"nominal", "high", "n", "h"}
+
+# diverse_neg 候補 (~200件): 全球ランダムグリッド (seed=42) + 手動追加
 # 各エントリ: desc, lat, lon, ts
-DIVERSE_NEG_LOCATIONS: list[dict] = [
-    # 砂漠・乾燥地 (10件)
-    # 乾季は SWIR 高輝度・NBR2 低下が burn scar と類似しやすいため乾季 timestamp を優先
-    # 湿潤期 timestamp はモデルが TN を維持できることの確認用
-    {"desc": "Sahara Algeria",            "lat": 23.0,  "lon":   5.0,  "ts": "2025-07-15T10:00:00Z"},  # dry season
-    {"desc": "Sahara Libya",              "lat": 26.0,  "lon":  14.0,  "ts": "2026-03-15T09:00:00Z"},
-    {"desc": "Arabian Peninsula KSA",     "lat": 24.0,  "lon":  45.0,  "ts": "2025-01-15T08:00:00Z"},  # dry season
-    {"desc": "Arabian Peninsula UAE",     "lat": 24.5,  "lon":  54.5,  "ts": "2026-03-15T07:00:00Z"},
-    {"desc": "Australian outback SA",     "lat":-25.0,  "lon": 135.0,  "ts": "2026-03-15T02:00:00Z"},
-    {"desc": "Australian outback NT",     "lat":-22.0,  "lon": 133.0,  "ts": "2026-03-15T01:00:00Z"},
-    {"desc": "Atacama Desert Chile",      "lat":-24.0,  "lon": -69.5,  "ts": "2025-07-15T14:00:00Z"},  # dry season
-    {"desc": "Gobi Desert Mongolia",      "lat": 44.0,  "lon": 106.0,  "ts": "2025-06-15T04:00:00Z"},  # dry season
-    {"desc": "Namib Desert Namibia",      "lat":-22.5,  "lon":  15.0,  "ts": "2025-08-15T10:00:00Z"},  # dry season
-    {"desc": "Iranian plateau",           "lat": 32.0,  "lon":  55.0,  "ts": "2025-07-15T07:00:00Z"},  # dry season
+def _generate_diverse_neg_candidates() -> list[dict]:
+    """全球ランダムグリッド + 手動追加で diverse_neg 候補を生成する (seed=42 固定)。"""
+    import random
+    rng = random.Random(42)
 
-    # 都市郊外 (8件)
-    # 乾季の低植生・裸地テクスチャが burn scar と視覚的に類似しやすい
-    {"desc": "London suburbs",            "lat": 51.5,  "lon":  -0.1,  "ts": "2026-03-15T11:00:00Z"},
-    {"desc": "Paris suburbs",             "lat": 48.8,  "lon":   2.2,  "ts": "2025-08-15T11:00:00Z"},  # dry season
-    {"desc": "Chicago suburbs",           "lat": 41.9,  "lon": -87.7,  "ts": "2026-03-15T17:00:00Z"},
-    {"desc": "Seoul suburbs",             "lat": 37.5,  "lon": 127.0,  "ts": "2025-01-15T02:00:00Z"},  # dry season
-    {"desc": "Sydney suburbs",            "lat":-33.8,  "lon": 151.0,  "ts": "2025-07-15T00:00:00Z"},  # dry season
-    {"desc": "Buenos Aires suburbs",      "lat":-34.6,  "lon": -58.5,  "ts": "2025-01-15T14:00:00Z"},  # dry season
-    {"desc": "Istanbul suburbs",          "lat": 41.0,  "lon":  29.0,  "ts": "2026-03-15T09:00:00Z"},
-    {"desc": "Mumbai suburbs",            "lat": 19.1,  "lon":  73.0,  "ts": "2025-01-15T07:00:00Z"},  # dry season
+    # 陸地が多い bounding box (海のみのエリアを避ける粗い近似)
+    land_boxes = [
+        (-125, 25, -65, 60),    # 北米
+        (-80, -55, -35, 10),    # 南米
+        (-20, -35, 50, 35),     # アフリカ
+        (-15, 35, 40, 70),      # ヨーロッパ
+        (25,  5, 100, 55),      # 中東・南アジア・東アジア西部
+        (100, -10, 145, 50),    # 東アジア・東南アジア
+        (110, -40, 155, -10),   # オーストラリア
+    ]
+    months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    days   = [1, 8, 15, 22]
 
-    # 湿地・デルタ (8件)
-    # 乾季は水位低下により泥炭・裸地露出 → SWIR 高反射で burn scar と混同されやすい
-    {"desc": "Bangladesh Ganges delta",   "lat": 22.5,  "lon":  90.5,  "ts": "2025-01-15T05:00:00Z"},  # dry season
-    {"desc": "Mekong delta Vietnam",      "lat":  9.5,  "lon": 105.5,  "ts": "2025-01-15T04:00:00Z"},  # dry season
-    {"desc": "Nile delta Egypt",          "lat": 31.0,  "lon":  31.0,  "ts": "2025-07-15T09:00:00Z"},  # dry season
-    {"desc": "Okavango delta Botswana",   "lat":-19.5,  "lon":  23.0,  "ts": "2025-08-15T10:00:00Z"},  # dry season
-    {"desc": "Danube delta Romania",      "lat": 45.0,  "lon":  29.5,  "ts": "2025-08-15T10:00:00Z"},  # dry season
-    {"desc": "Pantanal Brazil (dry)",     "lat":-17.0,  "lon": -57.0,  "ts": "2025-08-15T13:00:00Z"},  # dry season
-    {"desc": "Sudd wetland South Sudan",  "lat":  7.5,  "lon":  30.5,  "ts": "2025-01-15T09:00:00Z"},  # dry season
-    {"desc": "Sundarbans mangrove",       "lat": 21.9,  "lon":  89.2,  "ts": "2026-03-15T05:00:00Z"},
+    candidates = []
+    for lon_min, lat_min, lon_max, lat_max in land_boxes:
+        n = 22  # 7 boxes × 22 = 154 points
+        for _ in range(n):
+            lon = round(rng.uniform(lon_min, lon_max), 2)
+            lat = round(rng.uniform(lat_min, lat_max), 2)
+            mo  = rng.choice(months)
+            dy  = rng.choice(days)
+            hr  = rng.choice([0, 3, 6, 9, 12])
+            ts  = f"2025-{mo:02d}-{dy:02d}T{hr:02d}:00:00Z"
+            candidates.append({"desc": f"auto ({lon:.1f},{lat:.1f})", "lat": lat, "lon": lon, "ts": ts})
 
-    # サバンナ非火災期 (8件)
-    # 乾季は草地枯死・土壌露出で SWIR シグナルが burn scar と類似する
-    # 雨季 timestamp は TN 確認用
-    {"desc": "Kenya savanna rainy",       "lat":  1.0,  "lon":  37.0,  "ts": "2026-03-15T09:00:00Z"},
-    {"desc": "Tanzania Serengeti dry",    "lat": -2.5,  "lon":  35.0,  "ts": "2025-08-15T09:00:00Z"},  # dry season
-    {"desc": "Zambia plateau rainy",      "lat":-14.0,  "lon":  28.0,  "ts": "2026-03-15T10:00:00Z"},
-    {"desc": "Colombian Llanos rainy",    "lat":  5.0,  "lon": -70.0,  "ts": "2026-03-15T14:00:00Z"},
-    {"desc": "Venezuela Llanos dry",      "lat":  7.0,  "lon": -66.0,  "ts": "2025-01-15T14:00:00Z"},  # dry season
-    {"desc": "Myanmar dry zone",          "lat": 21.0,  "lon":  95.5,  "ts": "2025-12-15T04:00:00Z"},  # dry season
-    {"desc": "Indian Deccan plateau",     "lat": 17.5,  "lon":  78.0,  "ts": "2025-01-15T07:00:00Z"},  # dry season
-    {"desc": "Brazilian Cerrado dry",     "lat":-12.0,  "lon": -46.0,  "ts": "2025-07-15T13:00:00Z"},  # dry season
+    # 手動追加 (旧 DIVERSE_NEG_LOCATIONS の45件 — 実績ある地点を引き継ぐ)
+    manual = [
+        {"desc": "Sahara Algeria",            "lat": 23.0,  "lon":   5.0,  "ts": "2025-07-15T10:00:00Z"},
+        {"desc": "Sahara Libya",              "lat": 26.0,  "lon":  14.0,  "ts": "2025-03-15T09:00:00Z"},
+        {"desc": "Arabian Peninsula KSA",     "lat": 24.0,  "lon":  45.0,  "ts": "2025-01-15T08:00:00Z"},
+        {"desc": "Arabian Peninsula UAE",     "lat": 24.5,  "lon":  54.5,  "ts": "2025-03-15T07:00:00Z"},
+        {"desc": "Australian outback SA",     "lat":-25.0,  "lon": 135.0,  "ts": "2025-03-15T02:00:00Z"},
+        {"desc": "Australian outback NT",     "lat":-22.0,  "lon": 133.0,  "ts": "2025-03-15T01:00:00Z"},
+        {"desc": "Atacama Desert Chile",      "lat":-24.0,  "lon": -69.5,  "ts": "2025-07-15T14:00:00Z"},
+        {"desc": "Gobi Desert Mongolia",      "lat": 44.0,  "lon": 106.0,  "ts": "2025-06-15T04:00:00Z"},
+        {"desc": "Namib Desert Namibia",      "lat":-22.5,  "lon":  15.0,  "ts": "2025-08-15T10:00:00Z"},
+        {"desc": "Iranian plateau",           "lat": 32.0,  "lon":  55.0,  "ts": "2025-07-15T07:00:00Z"},
+        {"desc": "London suburbs",            "lat": 51.5,  "lon":  -0.1,  "ts": "2025-03-15T11:00:00Z"},
+        {"desc": "Paris suburbs",             "lat": 48.8,  "lon":   2.2,  "ts": "2025-08-15T11:00:00Z"},
+        {"desc": "Chicago suburbs",           "lat": 41.9,  "lon": -87.7,  "ts": "2025-03-15T17:00:00Z"},
+        {"desc": "Seoul suburbs",             "lat": 37.5,  "lon": 127.0,  "ts": "2025-01-15T02:00:00Z"},
+        {"desc": "Sydney suburbs",            "lat":-33.8,  "lon": 151.0,  "ts": "2025-07-15T00:00:00Z"},
+        {"desc": "Buenos Aires suburbs",      "lat":-34.6,  "lon": -58.5,  "ts": "2025-01-15T14:00:00Z"},
+        {"desc": "Istanbul suburbs",          "lat": 41.0,  "lon":  29.0,  "ts": "2025-03-15T09:00:00Z"},
+        {"desc": "Mumbai suburbs",            "lat": 19.1,  "lon":  73.0,  "ts": "2025-01-15T07:00:00Z"},
+        {"desc": "Bangladesh Ganges delta",   "lat": 22.5,  "lon":  90.5,  "ts": "2025-01-15T05:00:00Z"},
+        {"desc": "Mekong delta Vietnam",      "lat":  9.5,  "lon": 105.5,  "ts": "2025-01-15T04:00:00Z"},
+        {"desc": "Nile delta Egypt",          "lat": 31.0,  "lon":  31.0,  "ts": "2025-07-15T09:00:00Z"},
+        {"desc": "Okavango delta Botswana",   "lat":-19.5,  "lon":  23.0,  "ts": "2025-08-15T10:00:00Z"},
+        {"desc": "Danube delta Romania",      "lat": 45.0,  "lon":  29.5,  "ts": "2025-08-15T10:00:00Z"},
+        {"desc": "Pantanal Brazil (dry)",     "lat":-17.0,  "lon": -57.0,  "ts": "2025-08-15T13:00:00Z"},
+        {"desc": "Sudd wetland South Sudan",  "lat":  7.5,  "lon":  30.5,  "ts": "2025-01-15T09:00:00Z"},
+        {"desc": "Sundarbans mangrove",       "lat": 21.9,  "lon":  89.2,  "ts": "2025-03-15T05:00:00Z"},
+        {"desc": "Kenya savanna",             "lat":  1.0,  "lon":  37.0,  "ts": "2025-03-15T09:00:00Z"},
+        {"desc": "Tanzania Serengeti dry",    "lat": -2.5,  "lon":  35.0,  "ts": "2025-08-15T09:00:00Z"},
+        {"desc": "Zambia plateau",            "lat":-14.0,  "lon":  28.0,  "ts": "2025-03-15T10:00:00Z"},
+        {"desc": "Colombian Llanos",          "lat":  5.0,  "lon": -70.0,  "ts": "2025-03-15T14:00:00Z"},
+        {"desc": "Venezuela Llanos dry",      "lat":  7.0,  "lon": -66.0,  "ts": "2025-01-15T14:00:00Z"},
+        {"desc": "Myanmar dry zone",          "lat": 21.0,  "lon":  95.5,  "ts": "2025-12-15T04:00:00Z"},
+        {"desc": "Indian Deccan plateau",     "lat": 17.5,  "lon":  78.0,  "ts": "2025-01-15T07:00:00Z"},
+        {"desc": "Brazilian Cerrado dry",     "lat":-12.0,  "lon": -46.0,  "ts": "2025-07-15T13:00:00Z"},
+        {"desc": "Germany Black Forest",      "lat": 48.0,  "lon":   8.2,  "ts": "2025-08-15T11:00:00Z"},
+        {"desc": "Canada boreal Manitoba",    "lat": 55.0,  "lon":-100.0,  "ts": "2025-07-15T18:00:00Z"},
+        {"desc": "Brazil deep Amazon",        "lat": -2.0,  "lon": -62.0,  "ts": "2025-08-15T15:00:00Z"},
+        {"desc": "Scandinavia boreal Norway", "lat": 63.0,  "lon":  13.0,  "ts": "2025-07-15T11:00:00Z"},
+        {"desc": "Carpathian forest Romania", "lat": 46.0,  "lon":  25.0,  "ts": "2025-08-15T10:00:00Z"},
+        {"desc": "New Zealand temperate",     "lat":-43.5,  "lon": 171.5,  "ts": "2025-01-15T02:00:00Z"},
+        {"desc": "France agricultural",       "lat": 45.0,  "lon":   2.0,  "ts": "2025-08-15T11:00:00Z"},
+        {"desc": "Japan rice paddies Aichi",  "lat": 35.0,  "lon": 137.0,  "ts": "2025-01-15T02:00:00Z"},
+        {"desc": "Ireland grassland",         "lat": 53.0,  "lon":  -8.0,  "ts": "2025-03-15T12:00:00Z"},
+        {"desc": "Ukraine wheat fields",      "lat": 49.0,  "lon":  32.0,  "ts": "2025-08-15T09:00:00Z"},
+        {"desc": "Argentine Pampas",          "lat":-34.0,  "lon": -62.0,  "ts": "2025-01-15T14:00:00Z"},
+    ]
+    return manual + candidates  # 手動優先で並べる (既実績地点から先に試す)
 
-    # 温帯森林 (6件)
-    # 落葉後の裸地テクスチャや夏季乾燥ストレスが burn scar に類似しやすい
-    {"desc": "Germany Black Forest",      "lat": 48.0,  "lon":   8.2,  "ts": "2025-08-15T11:00:00Z"},  # dry season
-    {"desc": "Canada boreal Manitoba",    "lat": 55.0,  "lon":-100.0,  "ts": "2025-07-15T18:00:00Z"},  # dry season
-    {"desc": "Brazil deep Amazon",        "lat": -2.0,  "lon": -62.0,  "ts": "2025-08-15T15:00:00Z"},  # dry season
-    {"desc": "Scandinavia boreal Norway", "lat": 63.0,  "lon":  13.0,  "ts": "2025-07-15T11:00:00Z"},  # dry season
-    {"desc": "Carpathian forest Romania", "lat": 46.0,  "lon":  25.0,  "ts": "2025-08-15T10:00:00Z"},  # dry season
-    {"desc": "New Zealand temperate",     "lat":-43.5,  "lon": 171.5,  "ts": "2025-01-15T02:00:00Z"},  # dry season
-
-    # 農地・草地 (5件)
-    # 収穫後の裸地・乾季の枯草が SWIR 高反射になりやすい
-    {"desc": "France agricultural",       "lat": 45.0,  "lon":   2.0,  "ts": "2025-08-15T11:00:00Z"},  # dry season
-    {"desc": "Japan rice paddies Aichi",  "lat": 35.0,  "lon": 137.0,  "ts": "2025-01-15T02:00:00Z"},  # dry season
-    {"desc": "Ireland grassland",         "lat": 53.0,  "lon":  -8.0,  "ts": "2026-03-15T12:00:00Z"},
-    {"desc": "Ukraine wheat fields",      "lat": 49.0,  "lon":  32.0,  "ts": "2025-08-15T09:00:00Z"},  # dry season
-    {"desc": "Argentine Pampas",          "lat":-34.0,  "lon": -62.0,  "ts": "2025-01-15T14:00:00Z"},  # dry season
-]
+DIVERSE_NEG_CANDIDATES: list[dict] = _generate_diverse_neg_candidates()
+# 後方互換: 旧コードが DIVERSE_NEG_LOCATIONS を参照していた箇所向け
+DIVERSE_NEG_LOCATIONS = DIVERSE_NEG_CANDIDATES
 
 # ===========================================================================
 # FIRMS API
@@ -154,12 +178,35 @@ def _firms_key() -> str:
     return key
 
 
-def fetch_firms(area: str, days: int = 5) -> list[dict]:
-    """FIRMS VIIRS_SNPP_NRT から検知イベントを取得する。
-    days は 1〜5 のみ有効 (NRT 上限)。"""
+def _parse_firms_rows(text: str) -> list[dict]:
+    """FIRMS CSV テキスト → イベントリスト。NRT/SP 両形式の confidence を処理する。
+    NRT: "nominal"/"high"/"low", SP: "n"/"h"/"l" (略記)"""
+    events = []
+    for row in csv.DictReader(io.StringIO(text)):
+        try:
+            events.append({
+                "lat":  float(row["latitude"]),
+                "lon":  float(row["longitude"]),
+                "frp":  float(row.get("frp") or 0),
+                "date": row["acq_date"],
+                "time": str(row.get("acq_time", "0000")).zfill(4),
+                "conf": str(row.get("confidence", "n")).strip().lower(),
+            })
+        except Exception:
+            continue
+    return events
+
+
+def fetch_firms(area: str, days: int = 5, start_date: str | None = None) -> list[dict]:
+    """FIRMS VIIRS_SNPP_SP アーカイブから検知イベントを取得する (再現可能)。
+
+    FIRMS_PRODUCT = VIIRS_SNPP_SP: start_date 必須。days は 1〜5。
+    start_date 省略時は FIRMS_TRAIN_START を使用。
+    """
+    date = start_date or FIRMS_TRAIN_START
     url = (
         f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/"
-        f"{_firms_key()}/{FIRMS_PRODUCT}/{area}/{days}"
+        f"{_firms_key()}/{FIRMS_PRODUCT}/{area}/{days}/{date}"
     )
     try:
         r = requests.get(url, timeout=60)
@@ -169,24 +216,7 @@ def fetch_firms(area: str, days: int = 5) -> list[dict]:
     except Exception as e:
         print(f"    [FIRMS] 取得失敗: {e}")
         return []
-
-    # csv.DictReader でヘッダー名ベースにパース (poc2_icl.py と同一方式)
-    events = []
-    for row in csv.DictReader(io.StringIO(r.text)):
-        try:
-            date_str = row["acq_date"]
-            time_str = str(row["acq_time"]).zfill(4)
-            events.append({
-                "lat":  float(row["latitude"]),
-                "lon":  float(row["longitude"]),
-                "frp":  float(row.get("frp") or 0),
-                "date": date_str,            # "YYYY-MM-DD"
-                "time": time_str,            # "HHMM"
-                "conf": str(row.get("confidence", "n")).strip().lower(),
-            })
-        except Exception:
-            continue
-    return events
+    return _parse_firms_rows(r.text)
 
 
 def fetch_firms_at_date(lon: float, lat: float, date_str: str,
@@ -249,6 +279,8 @@ def _find_fire_free_neg_ts(event: dict) -> str | None:
         fires    = fetch_firms_at_date(lon, lat, neg_date,
                                        radius_deg=0.1,
                                        days=NEG_FIRMS_WINDOW_DAYS)
+        # confidence フィルタ: NRT="nominal"/"high", SP="n"/"h"
+        fires = [f for f in fires if f.get("conf", "l") in FIRMS_CONF_OK]
         if not fires:
             return neg_dt.strftime("%Y-%m-%dT12:00:00Z")
         # FIRMS 検知あり → 次のオフセット候補へ
@@ -394,29 +426,36 @@ class DatasetBuilder:
 
     # ------------------------------------------------------------------
 
-    def collect_firms(self, n_pos: int = 100, firms_days: int = 30,
-                      min_frp: float = 0.0) -> None:
+    def collect_firms(self, n_pos: int = 100, min_frp: float = 0.0,
+                      firms_days: int = 30) -> None:
         """
-        FIRMS イベント → POS + NEG temporal ペアを収集。
+        FIRMS VIIRS_SNPP_SP 固定期間 → POS + NEG temporal ペアを収集 (再現可能)。
 
+        固定期間: FIRMS_TRAIN_START から FIRMS_TRAIN_WINDOW 日間 (5日チャンクで取得)
         Δ≥0 フィルター: POS タイムスタンプが FIRMS 検知日以降のものだけ採用。
         min_frp: FRP 最低閾値 [MW]。デフォルト 0.0 (フィルタなし)。
-            指定する場合: FRP < 閾値の小規模火災は 20m ピクセルで希釈され
-            burn scar シグナルが消えるケースがある (混合ピクセル問題)。
+        firms_days: 後方互換のため残すが SP では無視される。
         """
         existing_pos = sum(1 for r in self.records if r["source"] == "firms_pos")
-        existing_neg = sum(1 for r in self.records if r["source"] == "firms_neg")
         need_pos = n_pos - existing_pos
         if need_pos <= 0:
             print(f"[Builder] FIRMS POS 既に {existing_pos} 件 → スキップ")
             return
 
-        print(f"\n[Builder] FIRMS イベント取得 (過去{firms_days}日, 目標POS={n_pos}件, min_frp={min_frp}MW) ...")
+        # SP: FIRMS_TRAIN_START から FIRMS_TRAIN_WINDOW 日間を 5日チャンクで取得
+        print(f"\n[Builder] FIRMS SP 取得 ({FIRMS_TRAIN_START} + {FIRMS_TRAIN_WINDOW}日, "
+              f"目標POS={n_pos}件, min_frp={min_frp}MW) ...")
         events: list[dict] = []
-        for name, area in FIRMS_AREAS.items():
-            evs = fetch_firms(area, firms_days)
-            print(f"    {name}: {len(evs)} イベント")
-            events.extend(evs)
+        start_dt = datetime.strptime(FIRMS_TRAIN_START, "%Y-%m-%d")
+        for offset in range(0, FIRMS_TRAIN_WINDOW, 5):
+            chunk_start = (start_dt + timedelta(days=offset)).strftime("%Y-%m-%d")
+            chunk_days  = min(5, FIRMS_TRAIN_WINDOW - offset)
+            for name, area in FIRMS_AREAS.items():
+                evs = fetch_firms(area, days=chunk_days, start_date=chunk_start)
+                events.extend(evs)
+        # confidence フィルタ (NRT="nominal"/"high", SP="n"/"h")
+        events = [e for e in events if e.get("conf", "l") in FIRMS_CONF_OK]
+        print(f"    合計 {len(events)} イベント (confidence フィルタ後)")
 
         if not events:
             print("[Builder] FIRMS データなし")
@@ -500,18 +539,32 @@ class DatasetBuilder:
 
     # ------------------------------------------------------------------
 
-    def collect_diverse_neg(self, locations: list[dict] | None = None) -> None:
-        """FP-prone バイオームの非火災地点を収集。"""
-        if locations is None:
-            locations = DIVERSE_NEG_LOCATIONS
+    def collect_diverse_neg(self, target: int = DIVERSE_NEG_TARGET,
+                            candidates: list[dict] | None = None) -> None:
+        """DIVERSE_NEG_CANDIDATES から cloud≤50% で target 件収集する。
+
+        target: 収集目標件数 (デフォルト DIVERSE_NEG_TARGET=100)
+        candidates: 候補リスト (省略時 DIVERSE_NEG_CANDIDATES)
+        """
+        if candidates is None:
+            candidates = DIVERSE_NEG_CANDIDATES
 
         existing = sum(1 for r in self.records if r["source"] == "diverse_neg")
-        print(f"\n[Builder] diverse NEG 収集 (既存={existing}, 目標={len(locations)}) ...")
+        need = target - existing
+        if need <= 0:
+            print(f"[Builder] diverse NEG 既に {existing} 件 → スキップ")
+            return
+
+        print(f"\n[Builder] diverse NEG 収集 (既存={existing}, 目標={target}, "
+              f"候補={len(candidates)}) ...")
 
         collected = 0
-        for loc in locations:
+        for loc in candidates:
+            if collected >= need:
+                break
             ts_date = loc["ts"][:10]
             if self._already_fetched(loc["lon"], loc["lat"], ts_date):
+                collected += 1  # 既取得分もカウント
                 continue
 
             print(f"  [{loc['desc']}] ...", end=" ", flush=True)
@@ -526,7 +579,8 @@ class DatasetBuilder:
             print(f"✅ NBR2_min={result['scene'].indices.nbr2_min:.3f} ({time.perf_counter()-t0:.1f}s)")
             collected += 1
 
-        print(f"[Builder] diverse NEG 収集完了: +{collected} 件")
+        total_diverse = sum(1 for r in self.records if r["source"] == "diverse_neg")
+        print(f"[Builder] diverse NEG 収集完了: 合計 {total_diverse} 件")
 
     # ------------------------------------------------------------------
 
@@ -536,7 +590,7 @@ class DatasetBuilder:
 
         分割戦略:
           - stratified by label (fire/no-fire)
-          - diverse_neg は val/test に均等配分されるよう試みる
+          - diverse_neg は firms_neg と混在して train/val/test にランダム分配される (〜70% が train)
           - test は学習中に一切触れない held-out set
         """
         from datasets import Dataset
