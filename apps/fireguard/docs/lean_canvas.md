@@ -196,4 +196,4 @@ FIRMS アーカイブ（発火座標・日時）
 2. 燃料リスクのみ（気象なし）で保険会社の引受判断に十分な情報量があるか
 
 **ポジション（比較）:**
-FireEdge (69pt) > DarkFleet (67pt) > FireGuard (65pt) > OrbitTriage (62pt) > HarborLens (63pt) > PortPulse (63pt) > InfraWatch (58pt) > CoralShield (57pt)
+→ 最新スコアは [comparison.md](../comparison.md) 参照

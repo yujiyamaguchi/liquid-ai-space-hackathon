@@ -134,4 +134,4 @@
 3. **AIS 外部依存**: Open AIS API（MarineTraffic free tier / Marine Cadastre）を使ったデモロジックの実装
 
 **ポジション（他案比較）**
-FireEdge (68pt) ≧ **DarkFleet (67pt)** > HarborLens (60pt) > PortPulse (57pt) > InfraWatch (53pt) ≈ OrbitTriage (53pt) > CoralShield (51pt)
+→ 最新スコアは [comparison.md](../comparison.md) 参照

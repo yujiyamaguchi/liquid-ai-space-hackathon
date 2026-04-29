@@ -1,10 +1,7 @@
 """
 FireEdge: Smoke-Penetrating Fire Detection Pipeline
 ====================================================
-Specification-Driven Development (SDD) — すべての入出力インターフェース定義
-
-このファイルはコードの「憲法」です。実装前にここで合意を取り、
-実装中もここを参照して型・スキーマのズレを防いでください。
+すべての入出力インターフェース定義
 
 Author: FireEdge Team
 Date: 2026-04-15

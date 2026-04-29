@@ -135,4 +135,4 @@ GT: AIS 船舶到着/出港レコード × SimSat 在庫変化の時系列照合
 3. **スコープ推奨**: 油タンク floating roof 監視に特化すると 10m 解像度での技術的整合性が増す
 
 **ポジション**
-FireEdge (69pt) > DarkFleet (67pt) > OrbitTriage (62pt) > HarborLens (60pt) > PortPulse (57pt) > InfraWatch (53pt) > CoralShield (52pt)
+→ 最新スコアは [comparison.md](../comparison.md) 参照

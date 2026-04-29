@@ -170,4 +170,4 @@ GT: AIS 船舶到着/出港レコード（Marine Cadastre 歴史 AIS）× SimSat
 4. ✅ 競合との差別化: Orbital Insight / Kayrros / Bloomberg AIS との定量比較表を作成
 
 **ポジション**
-FireEdge (69pt) > DarkFleet (67pt) > OrbitTriage (62pt) > HarborLens (63pt) > PortPulse (63pt) > InfraWatch (58pt) > CoralShield (57pt)
+→ 最新スコアは [comparison.md](../comparison.md) 参照

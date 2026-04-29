@@ -152,5 +152,5 @@
 - **デモを「Before/After」で見える化**: 地上局接触時に受信されたシーン数を棒グラフで比較
 
 ### ポジション（他案比較）
-FireEdge (68pt) ≧ DarkFleet (67pt) > HarborLens (60pt) > PortPulse (57pt) > InfraWatch (53pt) ≈ **OrbitTriage (53pt)** > CoralShield (51pt)
+→ 最新スコアは [comparison.md](../comparison.md) 参照
 - 技術的面白さはあるが、問題の「痛み」の具体性と Early Adopter の明確さで他案に劣る
