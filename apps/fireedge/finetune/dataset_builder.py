@@ -202,6 +202,7 @@ def fetch_firms(area: str, days: int = 5, start_date: str | None = None) -> list
 
     FIRMS_PRODUCT = VIIRS_SNPP_SP: start_date 必須。days は 1〜5。
     start_date 省略時は FIRMS_TRAIN_START を使用。
+    4xx は実装バグ・5xx は一時障害として区別する。
     """
     date = start_date or FIRMS_TRAIN_START
     url = (
@@ -210,28 +211,31 @@ def fetch_firms(area: str, days: int = 5, start_date: str | None = None) -> list
     )
     try:
         r = requests.get(url, timeout=60)
-        if not r.ok:
-            print(f"    [FIRMS] HTTP {r.status_code}: {r.text[:300]}")
-            return []
+    except requests.exceptions.ConnectionError as e:
+        raise RuntimeError(f"[FIRMS] 接続不能 (API が落ちているか URL が間違っています): {e}") from e
     except Exception as e:
-        print(f"    [FIRMS] 取得失敗: {e}")
+        print(f"    [FIRMS] 取得失敗 (一時的): {e}")
+        return []
+    if r.status_code == 400:
+        raise RuntimeError(f"[FIRMS] 400 Bad Request — パラメータ実装バグ: {r.text[:300]}")
+    if not r.ok:
+        print(f"    [FIRMS] HTTP {r.status_code} (一時的): {r.text[:200]}")
         return []
     return _parse_firms_rows(r.text)
 
 
 def fetch_firms_at_date(lon: float, lat: float, date_str: str,
-                        radius_deg: float = 0.1, days: int = 14) -> list[dict]:
+                        radius_deg: float = 0.1, days: int = 10) -> list[dict] | None:
     """FIRMS SP アーカイブで特定座標・日付付近の火災検知を照会。
 
-    FIRMS Area CSV API (date 指定版):
-      .../api/area/csv/{KEY}/VIIRS_SNPP_SP/{W,S,E,N}/{DAYS}/{DATE}
-    date_str: "YYYY-MM-DD"。days 日間（date_str から前方）を検索。
+    FIRMS SP API は 1 リクエストあたり最大 5 日。days が 5 超の場合は
+    5 日チャンクに分割して複数回リクエストする。
+    date_str を中心に ±(days//2) 日間を検索。
+    通信エラー・HTTP エラー発生時は None を返す（呼び出し側でスキップ）。
     """
     key = _firms_key()
-    # 検索ウィンドウの開始日 = date_str - days/2 (中心を date_str に)
     center_dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     start_dt  = center_dt - timedelta(days=days // 2)
-    start_str = start_dt.strftime("%Y-%m-%d")
 
     w = round(lon - radius_deg, 4)
     s = round(lat - radius_deg, 4)
@@ -239,54 +243,67 @@ def fetch_firms_at_date(lon: float, lat: float, date_str: str,
     n = round(lat + radius_deg, 4)
     bbox = f"{w},{s},{e},{n}"
 
-    url = (
-        f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/"
-        f"{key}/VIIRS_SNPP_SP/{bbox}/{days}/{start_str}"
-    )
-    try:
-        r = requests.get(url, timeout=30)
-        if not r.ok:
-            return []
-    except Exception:
-        return []
-
-    events = []
-    for row in csv.DictReader(io.StringIO(r.text)):
+    all_events: list[dict] = []
+    remaining = days
+    cur = start_dt
+    while remaining > 0:
+        chunk = min(5, remaining)
+        url = (
+            f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/"
+            f"{key}/VIIRS_SNPP_SP/{bbox}/{chunk}/{cur.strftime('%Y-%m-%d')}"
+        )
         try:
-            events.append({
-                "lat":  float(row["latitude"]),
-                "lon":  float(row["longitude"]),
-                "date": row["acq_date"],
-                "frp":  float(row.get("frp") or 0),
-            })
+            r = requests.get(url, timeout=30)
+        except requests.exceptions.ConnectionError as e:
+            raise RuntimeError(f"[FIRMS] 接続不能: {e}") from e
         except Exception:
-            continue
-    return events
+            return None  # 一時的エラー → この候補をスキップ
+        if r.status_code == 400:
+            raise RuntimeError(f"[FIRMS] 400 Bad Request — パラメータ実装バグ: {r.text[:200]}")
+        if not r.ok:
+            return None  # 5xx など一時的 → この候補をスキップ
+        for row in csv.DictReader(io.StringIO(r.text)):
+            try:
+                all_events.append({
+                    "lat":  float(row["latitude"]),
+                    "lon":  float(row["longitude"]),
+                    "date": row["acq_date"],
+                    "frp":  float(row.get("frp") or 0),
+                    "conf": str(row.get("confidence", "l")).strip().lower(),
+                })
+            except Exception:
+                continue
+        cur += timedelta(days=chunk)
+        remaining -= chunk
+    return all_events
 
 
-def _find_fire_free_neg_ts(event: dict) -> str | None:
-    """FIRMS SP アーカイブを確認し、fire-free な NEG タイムスタンプを返す。
+def _find_fire_free_neg_candidates(event: dict) -> list[str]:
+    """FIRMS SP アーカイブを確認し、fire-free な NEG タイムスタンプ候補リストを返す。
 
-    NEG_OFFSET_CANDIDATES を順に試し、FIRMS 検知がない最初のオフセットを採用。
-    すべてのオフセットで火災が検知された場合は None を返す（ペア破棄）。
+    NEG_OFFSET_CANDIDATES を全て確認し、fire-free なものを全て返す。
+    呼び出し側が SimSat で cloud チェックし、失敗したら次の候補を試せるようにする。
     """
     lon, lat = event["lon"], event["lat"]
-    base_dt   = datetime.strptime(event["date"], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    base_dt  = datetime.strptime(event["date"], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    candidates = []
 
     for offset_days in NEG_OFFSET_CANDIDATES:
         neg_dt   = base_dt - timedelta(days=offset_days)
         neg_date = neg_dt.strftime("%Y-%m-%d")
-        fires    = fetch_firms_at_date(lon, lat, neg_date,
-                                       radius_deg=0.1,
-                                       days=NEG_FIRMS_WINDOW_DAYS)
-        # confidence フィルタ: NRT="nominal"/"high", SP="n"/"h"
+        fires = fetch_firms_at_date(lon, lat, neg_date,
+                                    radius_deg=0.1,
+                                    days=NEG_FIRMS_WINDOW_DAYS)
+        if fires is None:
+            print(f" [FIRMS確認] -{offset_days}日 取得失敗 → スキップ", end="", flush=True)
+            continue
         fires = [f for f in fires if f.get("conf", "l") in FIRMS_CONF_OK]
         if not fires:
-            return neg_dt.strftime("%Y-%m-%dT12:00:00Z")
-        # FIRMS 検知あり → 次のオフセット候補へ
-        print(f" [FIRMS確認] -{offset_days}日 に火災検知({len(fires)}件) → 次候補へ", end="", flush=True)
+            candidates.append(neg_dt.strftime("%Y-%m-%dT12:00:00Z"))
+        else:
+            print(f" [FIRMS確認] -{offset_days}日 に火災検知({len(fires)}件) → スキップ", end="", flush=True)
 
-    return None  # 全候補で火災検知 → ペア破棄
+    return candidates  # 空リスト = 全候補で火災検知 → ペア破棄
 
 
 def _event_to_pos_ts(event: dict) -> str:
@@ -357,12 +374,26 @@ class DatasetBuilder:
     # ------------------------------------------------------------------
 
     def _fetch_scene(self, lon: float, lat: float, timestamp: str) -> Optional[dict]:
-        """1シーンを取得してサンプル dict を返す。失敗時は None。"""
+        """1シーンを取得してサンプル dict を返す。
+        データ品質問題 (雲・no image) は None を返す。
+        インフラ障害 (接続不能・4xx) は例外を送出して呼び出し元でプログラムを止める。
+        """
         try:
             resp = self.client.fetch_fire_scene(
                 lon=lon, lat=lat, timestamp=timestamp,
                 size_km=SIZE_KM, window_seconds=WINDOW_SEC,
             )
+        except requests.exceptions.ConnectionError as e:
+            raise RuntimeError(
+                f"[SimSat] 接続不能 — SimSat が起動しているか確認してください: {e}"
+            ) from e
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code < 500:
+                raise RuntimeError(
+                    f"[SimSat] {e.response.status_code} — 実装バグの可能性: {e}"
+                ) from e
+            print(f" → skip (SimSat 5xx: {e})")
+            return None
         except Exception as e:
             print(f" → skip (fetch error: {e})")
             return None
@@ -506,23 +537,34 @@ class DatasetBuilder:
                 continue
             print(f"✅ NBR2_min={pos_result['scene'].indices.nbr2_min:.3f} ({time.perf_counter()-t0:.1f}s)")
 
-            # --- NEG temporal: FIRMS SP で fire-free な日付を選択 ---
+            # --- NEG temporal: fire-free な候補を全て取得し、cloud 通過まで順番に試す ---
             print(f"  NEG FIRMS確認中 ({lon:.2f},{lat:.2f}) ...", end=" ", flush=True)
-            neg_ts = _find_fire_free_neg_ts(ev)
-            if neg_ts is None:
+            neg_candidates = _find_fire_free_neg_candidates(ev)
+            if not neg_candidates:
                 print(f" → 全オフセットで火災検知 → ペア破棄")
                 skipped_pair += 1
                 continue
 
-            desc_neg = f"NEG temporal ({lon:.2f},{lat:.2f}) {neg_ts[:10]}"
-            print(f"\n  NEG {desc_neg} ...", end=" ", flush=True)
-            t0 = time.perf_counter()
-            neg_result = self._fetch_scene(lon, lat, neg_ts)
+            neg_result = None
+            neg_ts = None
+            for cand_ts in neg_candidates:
+                desc_try = f"NEG temporal ({lon:.2f},{lat:.2f}) {cand_ts[:10]}"
+                print(f"\n  NEG {desc_try} ...", end=" ", flush=True)
+                t0 = time.perf_counter()
+                result = self._fetch_scene(lon, lat, cand_ts)
+                if result is not None:
+                    neg_result = result
+                    neg_ts     = cand_ts
+                    print(f"✅ NBR2_min={result['scene'].indices.nbr2_min:.3f} ({time.perf_counter()-t0:.1f}s)")
+                    break
+                # cloud or no_image → 次のオフセット候補へ
+
             if neg_result is None:
-                print(f" → NEG失敗のためペア破棄")
+                print(f" → 全候補で NEG 取得失敗 → ペア破棄")
                 skipped_pair += 1
                 continue
-            print(f"✅ NBR2_min={neg_result['scene'].indices.nbr2_min:.3f} ({time.perf_counter()-t0:.1f}s)")
+
+            desc_neg = f"NEG temporal ({lon:.2f},{lat:.2f}) {neg_ts[:10]}"
 
             # 両方成功 → 保存
             self._add_record(lon, lat, ts_date_pos,
