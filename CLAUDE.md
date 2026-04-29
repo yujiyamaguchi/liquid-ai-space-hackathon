@@ -58,7 +58,7 @@
 ### SimSat (DPhi Space 衛星シミュレータ)
 - **データ API**: `http://localhost:9005/` — Sentinel-2 データ取得エンドポイント
 - **ヘルスチェック**: `curl http://localhost:9005/` → `{"message":"Simulation API is online"}` で正常確認
-- **起動**: `cd /home/yamag/SimSat && docker compose up -d`
+- **起動**: `cd simsat && docker compose up -d`
 - **SimSat が動いているかの確認は常に `http://localhost:9005/` で行うこと**
 
 ### FIRMS API (NASA 野火 GT データ)
@@ -67,24 +67,24 @@
 - **エンドポイント**: `https://firms.modaps.eosdis.nasa.gov/api/area/csv/{KEY}/{PRODUCT}/{BBOX}/{DAYS}`
 - **プロダクト**: `VIIRS_SNPP_NRT`（直近5日）、`VIIRS_SNPP_SP`（アーカイブ）
 
-## Key Principles (SDD & Edge-First & Domain Honesty)
+## Key Principles (Edge-First & Domain Honesty)
 1. **Domain Honesty（衛星・事業知識の誠実さ）**:
    - 衛星スペクトル特性・軌道力学について不確かな点は推測せず、[docs/spectral_background.md](docs/spectral_background.md)（概念・精度指針）または [docs/sentinel2_guide.md](docs/sentinel2_guide.md)（バンド仕様・SimSat詳細）、各アプリの `docs/` を参照するか「要確認」と明示すること
    - 新規事業観点（市場規模・顧客検証・競合比較）は、ユーザーに聞かれる前に能動的に提示すること
    - 「技術的にできる」と「事業として意味がある」は別問題。実装前に必ず事業仮説との接続を確認すること
-2. **SDD (Specification Driven Development)**: 
-   実装前に入出力インターフェース（JSON スキーマ、バンド構成、Tensor shape 等）を仕様書または図で明確化し、**ユーザーの明示的な承認を得てから実装に入ること。承認なしに実装を開始しない。**
-2. **Edge Optimization**: 
+2. **変更承認**: 非自明な変更は実装前に方針を提示し、明示的な承認を得てから着手する。
+3. **Edge Optimization**: 
    衛星内の限られたリソースを想定し、低メモリ・低レイテンシな推論コードを追求すること。
    学習時のみ必要な依存（trl, peft 等）は `[project.optional-dependencies]` に分離し、推論コアの依存に含めないこと。
-3. **Data Authenticity**: 
+4. **Data Authenticity**: 
    学習データは SimSat API が返す実衛星データ (Sentinel-2) のみを使用すること。
    合成・加工データ (synthetic augmentation 等) は使用しない。
    **ドメイン固有のスペクトル指標**（各アプリの `docs/` に定義）を一次グラウンドトゥルースとして使用する。
    外部 GT データソースはドメインごとに異なるため、各アプリの `docs/` に記載すること。
    （例: 野火 → NASA FIRMS VIIRS / GWIS / Copernicus EMS、インフラ → Copernicus EMS、海洋 → NOAA 等）
-4. **Public Sharing**: 
+5. **Public Sharing**: 
    ファインチューニングを行う場合、重みと学習コードを公開すること（ジャッジング必要条件）。公開方法・プラットフォームは提出方法確定後に決定する。
+6. **Self-documenting Code**: 実装の詳細（閾値・フィルタ条件）はコード定数をドキュメントとして扱う。マジックナンバーは使わず、`MAX_CLOUD_COVER_PCT = 50.0` のように意図が伝わる名前をつける。
 
 ## Operational Workflows (Intent-based Commands)
 
