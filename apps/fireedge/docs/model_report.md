@@ -106,7 +106,8 @@ SimSat API
   2. NIR は独立に percentile clip
   3. [SWIR22, SWIR16, NIR] → [R, G, B] チャネルとして uint8 変換
   4. Lanczos リサイズ → 448×448 PIL Image
-     ※ LFM 2.5-VL の vision encoder が想定する入力解像度に合わせるため
+     ※ SimSat が返す 5km シーンは約 502×505 px（~10m/px 相当）。
+       LFM 2.5-VL の vision encoder が想定する 448px に合わせる微小ダウンスケール
           ↓
   LFM 2.5-VL-450M (LoRA fine-tuned)
 ```
