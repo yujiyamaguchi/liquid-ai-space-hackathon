@@ -192,7 +192,7 @@ Respond with JSON only: {"fire_detected": true} or {"fire_detected": false}
 
 ### 学習曲線
 
-![training curves](eval/training_curves.png)
+![training curves](training_curves.png)
 
 | epoch | train loss | val loss | val token accuracy |
 |---|---|---|---|
@@ -210,7 +210,7 @@ epoch 3 前後で val loss が最小（best checkpoint = step 80）。epoch 4〜
 
 ### Test set（n=45、held-out、学習中未使用）
 
-![base vs finetuned](eval/base_vs_finetuned.png)
+![base vs finetuned](base_vs_finetuned.png)
 
 | メトリクス | Base LFM2.5-VL | FireEdge LoRA | Δ |
 |---|---|---|---|
