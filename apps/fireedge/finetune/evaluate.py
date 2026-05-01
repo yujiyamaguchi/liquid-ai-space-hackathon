@@ -45,6 +45,21 @@ MODEL_ID = "LiquidAI/LFM2.5-VL-450M"
 EVAL_OUT = ROOT / "data" / "finetune" / "eval"
 
 
+def _infer_run_name(adapter_path: Path, explicit: str | None) -> str | None:
+    """adapter パス (.../fireedge-lora/{run_name}/adapter) から run_name を推定。"""
+    if explicit:
+        return explicit
+    parts = list(adapter_path.parts)
+    if "adapter" in parts:
+        idx = parts.index("adapter")
+        if idx > 0:
+            candidate = parts[idx - 1]
+            # "fireedge-lora" 自体は run_name ではない
+            if candidate != "fireedge-lora":
+                return candidate
+    return None
+
+
 
 # ===========================================================================
 # 推論ユーティリティ
@@ -288,6 +303,8 @@ def main():
                    help="base model 評価をスキップ (adapter のみ評価、デフォルト: スキップ)")
     p.add_argument("--run-base", action="store_true",
                    help="base model も評価する (--skip-base を上書き)")
+    p.add_argument("--run-name",     type=str, default=None,
+                   help="実験名 (eval 保存先サブディレクトリ)。未指定時は adapter パスから自動推定")
     args = p.parse_args()
     if args.run_base:
         args.skip_base = False
@@ -301,7 +318,12 @@ def main():
     print(f"[Eval] test set: {len(test_ds)} 件 "
           f"(fire={sum(test_ds['label'])}, no-fire={len(test_ds)-sum(test_ds['label'])})")
 
-    EVAL_OUT.mkdir(parents=True, exist_ok=True)
+    adapter_path = Path(args.adapter)
+    run_name = _infer_run_name(adapter_path, args.run_name)
+    eval_out = EVAL_OUT / run_name if run_name else EVAL_OUT
+    eval_out.mkdir(parents=True, exist_ok=True)
+    if run_name:
+        print(f"[Eval] run_name: {run_name}  →  eval 出力先: {eval_out}")
     device = args.device
 
     # --- Base model ---
@@ -322,7 +344,6 @@ def main():
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
 
     # --- Fine-tuned model ---
-    adapter_path = Path(args.adapter)
     if not adapter_path.exists():
         print(f"[ERROR] adapter が見つかりません: {adapter_path}")
         print("  先に `uv run python -m finetune.train` を実行してください。")
@@ -345,14 +366,14 @@ def main():
     # --- Report ---
     if base_results:
         print_report(base_results, ft_results)
-        plot_comparison(base_results, ft_results, EVAL_OUT)
+        plot_comparison(base_results, ft_results, eval_out)
     else:
         print("\n[Eval] Fine-tuned only:")
         for key in ["precision", "recall", "f1", "fp_rate", "accuracy"]:
             print(f"  {key}: {ft_results[key]:.3f}")
 
     # --- JSON 保存 ---
-    results_path = EVAL_OUT / "results.json"
+    results_path = eval_out / "results.json"
     with open(results_path, "w") as fh:
         json.dump({
             "base":      base_results,

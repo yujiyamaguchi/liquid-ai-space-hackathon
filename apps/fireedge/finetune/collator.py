@@ -30,14 +30,18 @@ class VLMFireCollator:
     """
     messages_json (str) + image (PIL) のバッチ → モデル入力バッチ。
 
-    損失マスク戦略:
+    損失マスク戦略 (mask_non_assistant=True, デフォルト):
       - system + user トークン → labels = -100 (損失計算除外)
       - assistant 応答トークン → labels = input_ids (損失計算対象)
+
+    mask_non_assistant=False (実験用):
+      - パディング以外の全トークンを損失計算対象にする
     """
 
-    def __init__(self, processor, max_length: int = 1024):
+    def __init__(self, processor, max_length: int = 1024, mask_non_assistant: bool = True):
         self.processor = processor
         self.max_length = max_length
+        self.mask_non_assistant = mask_non_assistant
 
         # assistant 開始を示すトークン列を事前計算
         # チャットテンプレートから "<|im_start|>assistant\n" のトークン ID を取得
@@ -75,18 +79,19 @@ class VLMFireCollator:
         input_ids = batch["input_ids"]          # (B, L)
         attention_mask = batch["attention_mask"] # (B, L)
         labels = input_ids.clone()
-        labels[attention_mask == 0] = -100       # パディング部分を除外
+        labels[attention_mask == 0] = -100       # パディング部分は常に除外
 
-        # assistant 応答開始位置より前を -100 でマスク
-        for i in range(input_ids.shape[0]):
-            seq = input_ids[i].tolist()
-            pos = _find_last_subseq(seq, self._asst_ids)
-            if pos >= 0:
-                # assistant ヘッダーの直後から損失計算開始
-                labels[i, : pos + len(self._asst_ids)] = -100
-            else:
-                # 見つからなければ全トークンを除外 (安全フォールバック)
-                labels[i, :] = -100
+        if self.mask_non_assistant:
+            # assistant 応答開始位置より前を -100 でマスク
+            for i in range(input_ids.shape[0]):
+                seq = input_ids[i].tolist()
+                pos = _find_last_subseq(seq, self._asst_ids)
+                if pos >= 0:
+                    # assistant ヘッダーの直後から損失計算開始
+                    labels[i, : pos + len(self._asst_ids)] = -100
+                else:
+                    # 見つからなければ全トークンを除外 (安全フォールバック)
+                    labels[i, :] = -100
 
         batch["labels"] = labels
         return batch

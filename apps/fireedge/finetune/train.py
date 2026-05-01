@@ -32,10 +32,14 @@ from finetune.config import FinetuneConfig
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
-    p.add_argument("--epochs",    type=int,   default=None)
-    p.add_argument("--lr",        type=float, default=None)
-    p.add_argument("--output",    type=str,   default=None)
-    p.add_argument("--dataset",   type=str,   default=None)
+    p.add_argument("--epochs",        type=int,   default=None)
+    p.add_argument("--lr",            type=float, default=None)
+    p.add_argument("--output",        type=str,   default=None)
+    p.add_argument("--dataset",       type=str,   default=None)
+    p.add_argument("--no-mask-asst",  action="store_true", default=False,
+                   help="system+user トークンも loss 対象にする (full_seq 実験)")
+    p.add_argument("--run-name",      type=str,   default=None,
+                   help="実験名 (output subdir)。未指定時は mask_asst / full_seq を自動設定")
     return p.parse_args()
 
 
@@ -43,15 +47,22 @@ def main():
     args = parse_args()
     cfg  = FinetuneConfig()
 
-    if args.epochs:  cfg.num_train_epochs = args.epochs
-    if args.lr:      cfg.learning_rate = args.lr
-    if args.output:  cfg.output_dir = args.output
-    if args.dataset: cfg.dataset_dir = args.dataset
+    if args.epochs:       cfg.num_train_epochs = args.epochs
+    if args.lr:           cfg.learning_rate = args.lr
+    if args.output:       cfg.output_dir = args.output
+    if args.dataset:      cfg.dataset_dir = args.dataset
+    if args.no_mask_asst: cfg.mask_non_assistant = False
+    if args.run_name:
+        cfg.run_name = args.run_name
+    elif not cfg.run_name:
+        cfg.run_name = "mask_asst" if cfg.mask_non_assistant else "full_seq"
 
     print("=" * 60)
     print("FireEdge LoRA Fine-Tuning")
     print(f"  model     : {cfg.model_id}")
-    print(f"  output    : {cfg.output_dir}")
+    print(f"  run_name  : {cfg.run_name}")
+    print(f"  mask_asst : {cfg.mask_non_assistant}")
+    print(f"  output    : {cfg.output_dir}/{cfg.run_name}")
     print(f"  epochs    : {cfg.num_train_epochs}")
     print(f"  lr        : {cfg.learning_rate}")
     print(f"  lora_r    : {cfg.lora_r}")
@@ -94,10 +105,11 @@ def main():
     model.print_trainable_parameters()
 
     # --------------------------------------------------------------- collator
-    collator = VLMFireCollator(processor, max_length=cfg.max_seq_length)
+    collator = VLMFireCollator(processor, max_length=cfg.max_seq_length,
+                               mask_non_assistant=cfg.mask_non_assistant)
 
     # ------------------------------------------------------------ SFT config
-    output_dir = Path(ROOT) / cfg.output_dir
+    output_dir = Path(ROOT) / cfg.output_dir / cfg.run_name
     sft_config = SFTConfig(
         output_dir=str(output_dir),
         num_train_epochs=cfg.num_train_epochs,

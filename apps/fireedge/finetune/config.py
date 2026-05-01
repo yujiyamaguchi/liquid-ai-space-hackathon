@@ -35,6 +35,10 @@ class FinetuneConfig:
     lora_alpha: int = 32   # alpha = 2 * r
     lora_dropout: float = 0.05
 
+    # --------------------------------------------------------------- experiment
+    mask_non_assistant: bool = True   # False = 全トークン損失 (full_seq 実験用)
+    run_name: str = ""                 # 空文字 → train.py が自動導出
+
     # --------------------------------------------------------------- training
     num_train_epochs: int = 5
     per_device_train_batch_size: int = 1
