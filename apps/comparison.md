@@ -8,18 +8,19 @@
 |---|---|---|---|---|---|---|---|---|
 | **ドメイン** | 野火検知（発火後） | **山火事リスク予測（発火前）** | ダーク船舶追跡 | 港湾タンク在庫監視 | 港湾/製造拠点のサプライチェーン予兆 | 洪水後インフラ損傷 | サンゴ礁白化 | 観測優先度トリアージ |
 | **Lean Canvas** | [fireedge/docs/](fireedge/docs/lean_canvas.md) | [fireguard/docs/](fireguard/docs/lean_canvas.md) | [darkfleet/docs/](darkfleet/docs/lean_canvas.md) | [harborlens/docs/](harborlens/docs/lean_canvas.md) | [portpulse/docs/](portpulse/docs/lean_canvas.md) | [infrawatch/docs/](infrawatch/docs/lean_canvas.md) | [coralshield/docs/](coralshield/docs/lean_canvas.md) | [orbittriage/docs/](orbittriage/docs/lean_canvas.md) |
-| **使用バンド** | B12/B11/B8 (SWIR22・SWIR16・NIR) | **B8A/B12(NBR)・B8/B4(NDVI)・B11 時系列** | B4/B3/B2 (RGB 10m) | B2〜B12 全般 | B4/B3/B2 (RGB 10m) | B4/B3/B8/B11/B12 | B2/B3/B4/B8A | B4/B3/B2 + ドメイン依存 |
-| **GT ソース** | NASA FIRMS VIIRS | **FIRMS 座標 × 発火 14〜28日前の SimSat 画像** | AIS データ + SimSat画像照合 | AIS 船舶動静 + SimSat 在庫変化の照合 | Marine Cadastre 歴史 AIS + IEA/METI 輸入統計（事後相関） | Copernicus EMS + 中小規模洪水は OSM 道路閉鎖データ | NOAA / GBRMPA 2024年白化データ | FIRMS + Copernicus EMS（共有） |
+| **使用バンド** | B12/B11/B8 (SWIR22・SWIR16・NIR) | **B8A/B11(NDMI_p10主指標)・B12(疑似カラー用) 時系列3点** | B4/B3/B2 (RGB 10m) | B2〜B12 全般 | B4/B3/B2 (RGB 10m) | B4/B3/B8/B11/B12 | B2/B3/B4/B8A | B4/B3/B2 + ドメイン依存 |
+| **GT ソース** | NASA FIRMS VIIRS | **FIRMS 座標 × 発火 7〜21日前の SimSat 画像**（-28dはシグナルなし除外） | AIS データ + SimSat画像照合 | AIS 船舶動静 + SimSat 在庫変化の照合 | Marine Cadastre 歴史 AIS + IEA/METI 輸入統計（事後相関） | Copernicus EMS + 中小規模洪水は OSM 道路閉鎖データ | NOAA / GBRMPA 2024年白化データ | FIRMS + Copernicus EMS（共有） |
 | **Early Adopter** | 衛星オペレーター・民間林業会社 | **P&C 損害保険会社（Swiss Re・Tokio Marine 等）** | 制裁コンプライアンス SaaS・トレードファイナンス銀行 | シンガポール系トレードファイナンス銀行 | トレードファイナンス銀行・代替データプロバイダー | 自然災害保険会社（査定部門） | GBRMPA | DPhi Space / 小型コンステレーション |
 | **ストレージ活用** | アラートキュー（~10MB） | **NBR/NDVI 時系列統計（~1.5MB/シーン）+ Few-shot参照画像** | AOI ベースライン画像（T0参照） | **T0 タンク画像（差分検知の基準、~33MB）** | AOI ベースライン + 入港頻度時系列 | 洪水前基準道路画像 | 礁ごとのB3/B4基準値 + Few-shot参照 | **Few-shot参照画像（4クラス×5枚 ~18MB）** |
 | **ダウンリンク形式** | JSON 2KB + SWIR thumbnail（任意 ~50KB） | GeoJSON リスクマップ（~10〜50KB） | JSON 2KB + RGB thumbnail（任意 ~50KB） | JSON 2KB（在庫変動アラート） | JSON + 入港頻度時系列（~5〜10KB） | GeoJSON リスクマップ（~10〜50KB） | GeoJSON 白化マスク（~10〜50KB） | JSON 優先度リスト（~2KB） |
-| **Critic スコア** | **58点** | **65点** | **67点** | **63点** | **63点** | **58点** | **57点** | **62点** |
+| **Critic スコア** | **58点** | **68点（修正済み）** | **67点** | **63点** | **63点** | **58点** | **57点** | **62点** |
 | **Critic 判定** | **技術デモ** | **Go** | **Go** | **Go** | **Go** | **Go** | **Go** | **Go** |
-| **フェーズ** | **技術デモ（/poc2完了）→ FireGuard へ継承** | **/ideate 完了** | /ideate 完了 | /ideate 完了 | /ideate 完了 | /ideate 完了 | /ideate 完了 | /ideate 完了 |
+| **フェーズ** | **技術デモ（/poc2完了）→ FireGuard へ継承** | **/poc 完了 (NDMI_p10 -7d p=0.038)** | /ideate 完了 | /ideate 完了 | /ideate 完了 | /ideate 完了 | /ideate 完了 | /ideate 完了 |
 
 ### FireGuard Critic 変遷
-- 初回評価: **62点・Go（条件付き）**（LFM vs RF の差別化不明・デモ地域が PoC リスク高・直接競合未記載）
-- 修正後: **65点・Go**（LFM 役割を時系列パターン認識に特化・デモをカリフォルニアに変更・Planet Analytics / Descartes Labs との比較追加）
+- 第1回: **62点・Go（条件付き）**（LFM vs RF の差別化不明・デモ地域が PoC リスク高・直接競合未記載）
+- 第1回修正後: **65点・Go**（LFM 役割を時系列パターン認識に特化・デモをカリフォルニアに変更・Planet Analytics / Descartes Labs との比較追加）
+- 第2回（/poc 完了後）: **68点・Go（要修正→修正済み）**（PoC でコア仮説実証 +、CZU→Woolsey 変更・10m→20m 修正・Lead time 2段階化で対応完了）
 
 ### DarkFleet Critic 変遷
 - 初回（修正前）: 62点推定・**要修正**（解像度制約で漁船対象不可、リビジット問題）
@@ -85,7 +86,7 @@ sentinel2_guide.md §10 の用途別バンド組み合わせに基づく。
 | アプリ | バンド | 用途 | SimSat 名 |
 |---|---|---|---|
 | FireEdge | B12, B11, B8 | 疑似カラー合成 (R=SWIR22, G=SWIR16, B=NIR)。burn scar が暗い赤〜茶色に見える | `swir22, swir16, nir` |
-| FireGuard | B8A, B12, B8, B4, B11 | NBR=(B8A-B12)/(B8A+B12) 植生含水率、NDVI=(B8-B4)/(B8+B4) 植生活性度、B11 水分ストレス。3〜5パスの時系列統計をストレージにキャッシュ | `nir08, swir22, nir, red, swir16` |
+| FireGuard | B8A, B11, B12 | NDMI_p10=(B8A-B11)/(B8A+B11) の 10th percentile が主指標。疑似カラー(R=B12,G=B8A,B=B11)を-21d/-14d/-7dの3点時系列でLFMに入力 | `nir08, swir16, swir22` |
 | DarkFleet | B4, B3, B2 | 10m RGB。船舶の形状・輝度を最高解像度で捉える | `red, green, blue` |
 | PortPulse | B4, B3, B2 | 10m RGB。大型タンカー（全長 100m+ = 10px+）の入港頻度カウント | `red, green, blue` |
 | InfraWatch | B4, B3, B8, B11, B12 | RGB + 浸水域 (NDWI) + 植生変化 (NDVI) + 構造物損傷 (SWIR) | `red, green, nir, swir16, swir22` |
